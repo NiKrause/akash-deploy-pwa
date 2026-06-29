@@ -1,10 +1,6 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
-
-const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [
@@ -38,13 +34,4 @@ export default defineConfig({
       },
     }),
   ],
-  resolve: {
-    alias: {
-      // Internal bundle chunk (getMessageType) is not listed in package exports
-      "akash-sdk-internal-chunk": path.resolve(
-        rootDir,
-        "node_modules/@akashnetwork/chain-sdk/dist/esm/chunk-YSOG5YCI.js"
-      ),
-    },
-  },
 });

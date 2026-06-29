@@ -1,4 +1,8 @@
-import type { AccountData, EncodeObject, OfflineSigner } from "@cosmjs/proto-signing";
+import { MsgCreateCertificate } from "@akashnetwork/chain-sdk/private-types/akash.v1";
+import { MsgCloseDeployment, MsgCreateDeployment } from "@akashnetwork/chain-sdk/private-types/akash.v1beta4";
+import { MsgCreateLease } from "@akashnetwork/chain-sdk/private-types/akash.v1beta5";
+import { TxRaw } from "@akashnetwork/chain-sdk/private-types/cosmos.v1beta1";
+import type { AccountData, EncodeObject, GeneratedType, OfflineSigner } from "@cosmjs/proto-signing";
 import { Registry } from "@cosmjs/proto-signing";
 import {
   calculateFee,
@@ -10,7 +14,6 @@ import {
   type DeliverTxResponse,
   type SignerData,
 } from "@cosmjs/stargate";
-import { getMessageType } from "akash-sdk-internal-chunk";
 
 const DEFAULT_GAS_PRICE = "0.025uakt";
 const DEFAULT_GAS_MULTIPLIER = 1.3;
@@ -30,11 +33,32 @@ async function defaultGetAccount(signer: OfflineSigner): Promise<AccountData> {
   return accounts[0];
 }
 
+type TypedGeneratedType = GeneratedType & { $type: string };
+
+const TX_MESSAGE_TYPES = [
+  MsgCreateCertificate,
+  MsgCreateDeployment,
+  MsgCloseDeployment,
+  MsgCreateLease,
+  TxRaw,
+] satisfies TypedGeneratedType[];
+
+const TX_MESSAGE_TYPE_BY_URL = new Map<string, GeneratedType>(
+  TX_MESSAGE_TYPES.flatMap((type) => [
+    [`/${type.$type}`, type],
+    [type.$type, type],
+  ])
+);
+
+function getTxMessageType(typeUrl: string): GeneratedType | undefined {
+  return TX_MESSAGE_TYPE_BY_URL.get(typeUrl);
+}
+
 /**
  * TxClient compatible with `createChainNodeWebSDK({ tx: { signer } })` using Keplr/CosmJS.
  */
 export function createBrowserStargateClient(options: BrowserStargateClientOptions) {
-  const builtInTypes: [string, import("@cosmjs/proto-signing").GeneratedType][] = [];
+  const builtInTypes: [string, GeneratedType][] = [];
   const registry = new Registry(builtInTypes);
   const gasPrice = GasPrice.fromString(options.defaultGasPrice ?? DEFAULT_GAS_PRICE);
   const gasMultiplier = options.gasMultiplier ?? DEFAULT_GAS_MULTIPLIER;
@@ -56,7 +80,7 @@ export function createBrowserStargateClient(options: BrowserStargateClientOption
   function ensureMessageTypesRegistered(messages: EncodeObject[]) {
     for (const message of messages) {
       if (registry.lookupType(message.typeUrl)) continue;
-      const type = getMessageType(message.typeUrl);
+      const type = getTxMessageType(message.typeUrl);
       if (!type) {
         throw new Error(`Cannot find message type ${message.typeUrl} in registry.`);
       }
@@ -91,7 +115,7 @@ export function createBrowserStargateClient(options: BrowserStargateClientOption
     txRaw: Awaited<ReturnType<SigningStargateClient["sign"]>>
   ): Promise<DeliverTxResponse> {
     const txTypeUrl = "/cosmos.tx.v1beta1.TxRaw";
-    const TxRawType = registry.lookupType(txTypeUrl) ?? getMessageType(txTypeUrl);
+    const TxRawType = registry.lookupType(txTypeUrl) ?? getTxMessageType(txTypeUrl);
     if (!TxRawType) throw new Error("TxRaw type not registered");
     const sg = await getStargate();
     return sg.broadcastTx(
@@ -125,6 +149,12 @@ export function createBrowserStargateClient(options: BrowserStargateClientOption
       const result = await broadcastInternal(txRaw);
       signOpts?.afterBroadcast?.(result);
       return result;
+    },
+    async disconnect() {
+      if (!stargatePromise) return;
+      const client = await stargatePromise;
+      client.disconnect();
+      stargatePromise = undefined;
     },
   };
 }

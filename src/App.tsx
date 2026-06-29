@@ -173,7 +173,7 @@ export default function App() {
   const [dseq, setDseq] = useState<string | null>(() => loadPersisted()?.dseq ?? null);
   const [leaseInfo, setLeaseInfo] = useState<unknown>(null);
 
-  const preview = useMemo(() => parseAndPreviewSdl(yamlText, endpoints), [yamlText, endpoints]);
+  const preview = useMemo(() => parseAndPreviewSdl(yamlText), [yamlText]);
 
   const balanceUaktDisplay = useMemo(() => formatUaktStringToAkt(walletBalances.uakt), [walletBalances.uakt]);
   const balanceUsdApprox = useMemo(() => {
@@ -289,7 +289,7 @@ export default function App() {
       return;
     }
     await loadWalletBalancesForAddress(addr);
-  }, [address, endpoints, signer, loadWalletBalancesForAddress]);
+  }, [address, signer, loadWalletBalancesForAddress]);
 
   useEffect(() => {
     if (!address && !signer) {
@@ -1029,7 +1029,7 @@ export default function App() {
             </ul>
             <p className="small muted">
               Manifest groups: {preview.value.groups.length}. This preview is derived from{" "}
-              <code>generateManifest</code> for network <code>{endpoints.sdlNetworkId}</code>.
+              <code>generateManifest</code>.
             </p>
           </div>
         ) : (

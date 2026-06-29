@@ -160,10 +160,6 @@ export type DeployStep =
   | "done"
   | "error";
 
-function networkIdFromEndpoints(endpoints: AkashEndpoints) {
-  return endpoints.sdlNetworkId;
-}
-
 function page(limit: number, offset = 0) {
   return {
     key: new Uint8Array(),
@@ -659,14 +655,13 @@ export function createFullSdk(endpoints: AkashEndpoints, signer: OfflineSigner):
   });
 }
 
-export function parseAndPreviewSdl(yamlText: string, endpoints: AkashEndpoints) {
-  const nid = networkIdFromEndpoints(endpoints);
+export function parseAndPreviewSdl(yamlText: string) {
   const sdl = yaml.raw(yamlText) as SDLInput;
-  const schemaErrors = validateSDL(sdl, nid);
+  const schemaErrors = validateSDL(sdl);
   if (schemaErrors?.length) {
     return { ok: false as const, errors: schemaErrors };
   }
-  const result = generateManifest(sdl, nid);
+  const result = generateManifest(sdl);
   if (!result.ok) {
     return { ok: false as const, errors: result.value };
   }
@@ -778,7 +773,7 @@ export async function createDeploymentTx(
   onStep: (s: DeployStep) => void
 ): Promise<{ dseq: string; groups: Manifest }> {
   onStep("creating_deployment");
-  const preview = parseAndPreviewSdl(yamlText, endpoints);
+  const preview = parseAndPreviewSdl(yamlText);
   if (!preview.ok) {
     throw new Error(`Invalid SDL: ${JSON.stringify(preview.errors)}`);
   }
@@ -806,6 +801,7 @@ export async function createDeploymentTx(
         amount: { denom: depDenom, amount: depAmount },
         sources: [1],
       },
+      reclamation: undefined,
     });
   } catch (e) {
     const raw = e instanceof Error ? e.message : String(e);
@@ -896,6 +892,57 @@ export function providerHttpBase(hostUri: string): string {
   return `https://${t.replace(/\/+$/, "")}`;
 }
 
+function isBrowserFetchNetworkError(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  if (!(error instanceof Error)) return false;
+  const m = error.message;
+  return m === "Failed to fetch" || m === "Load failed" || /networkerror|network request failed/i.test(m);
+}
+
+/**
+ * Browser `fetch` to a provider host often fails with a generic "Failed to fetch" when the
+ * provider omits CORS headers, blocks cross-origin traffic, or when HTTPS pages call HTTP URLs.
+ */
+async function fetchFromProviderOrExplain(
+  targetUrl: string,
+  init: RequestInit,
+  opts: { action: string; cliHint: string }
+): Promise<Response> {
+  const { action, cliHint } = opts;
+  let mixedContent = false;
+  try {
+    if (typeof globalThis.location !== "undefined") {
+      const page = globalThis.location.href;
+      if (page.startsWith("https:") && targetUrl.startsWith("http:")) mixedContent = true;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    return await fetch(targetUrl, init);
+  } catch (e) {
+    if (!isBrowserFetchNetworkError(e)) throw e;
+    let u: URL;
+    try {
+      u = new URL(targetUrl);
+    } catch {
+      throw new Error(
+        `Could not reach the provider (${targetUrl}) to ${action}. The browser blocked or could not complete the request (often CORS or mixed content). ${cliHint}`
+      );
+    }
+    const hostPart = u.port ? `${u.hostname}:${u.port}` : u.hostname;
+    if (mixedContent) {
+      throw new Error(
+        `Could not ${action} at ${hostPart}: this app is on HTTPS but the provider URL is HTTP, which browsers block (mixed content). Use a provider with HTTPS, run this app over HTTP during development, or use a desktop/CLI client. ${cliHint}`
+      );
+    }
+    throw new Error(
+      `Could not ${action} at ${hostPart} (${targetUrl}). The wallet step may have succeeded, but the browser could not reach the provider (typical causes: no CORS headers for this origin, host offline, or firewall/ad blocker). ${cliHint}`
+    );
+  }
+}
+
 export async function sendManifest(
   params: {
     owner: string;
@@ -922,15 +969,22 @@ export async function sendManifest(
 
   const body = manifestToSortedJSON(params.groups);
   const url = `${base}/deployment/${params.dseq}/manifest`;
-  const res = await fetch(url, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
+  const res = await fetchFromProviderOrExplain(
+    url,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body,
     },
-    body,
-  });
+    {
+      action: "upload the manifest",
+      cliHint: "Use `akash provider send-manifest` (or equivalent) from a machine that can reach the provider API.",
+    }
+  );
   if (!res.ok) {
     const t = await res.text();
     throw new Error(`Manifest upload failed (${res.status}): ${t}`);
@@ -986,7 +1040,10 @@ async function fetchProviderLeaseStatusJson(
   const gseq = lease.id.gseq ?? 1;
   const oseq = lease.id.oseq ?? 1;
   const statusUrl = `${base}/lease/${dseq}/${gseq}/${oseq}/status`;
-  const res = await fetch(statusUrl, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetchFromProviderOrExplain(statusUrl, { headers: { Authorization: `Bearer ${token}` } }, {
+    action: "load lease status",
+    cliHint: "Try `akash provider lease-status` or another tool that calls the provider outside the browser.",
+  });
   if (!res.ok) {
     return { kind: "http_error", statusCode: res.status, raw: await res.text() };
   }

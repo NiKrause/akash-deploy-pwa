@@ -10,12 +10,6 @@
 
     /* Bundler mode */
     "moduleResolution": "bundler",
-    "baseUrl": ".",
-    "paths": {
-      "akash-sdk-internal-chunk": [
-        "./node_modules/@akashnetwork/chain-sdk/dist/esm/chunk-YSOG5YCI.js"
-      ]
-    },
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",

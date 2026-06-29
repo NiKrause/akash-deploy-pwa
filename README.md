@@ -9,8 +9,6 @@ npm install
 npm run dev
 ```
 
-The repo includes [`.npmrc`](.npmrc) with `legacy-peer-deps=true` because **`vite-plugin-pwa@1.x` does not yet declare `vite@^8` in `peerDependencies`**, while this app uses **Vite 8** (required by `@vitejs/plugin-react@6`). The PWA plugin runs fine on Vite 8; npm’s resolver needs this until [vite-plugin-pwa adds Vite 8 to peers](https://github.com/vite-pwa/vite-plugin-pwa/issues/923). By contrast, projects on **Vite 5** (such as `bolt-orbitdb-blog` with `vite@^5.4` + `vite-plugin-pwa@^1.0.3`) install without that workaround.
-
 Open the app over **HTTPS** or `localhost` so the wallet extension can inject (`window.keplr` / `window.leap`).
 
 ## Sandbox end-to-end test
