@@ -7,7 +7,14 @@ import {
   txExplorerUrl,
   type NetworkMode,
 } from "./config/networks";
-import { alignSdlPricingDenomsToEscrow, getDefaultSdl } from "./akash/defaultSdl";
+import {
+  DEFAULT_SDL_TEMPLATE_ID,
+  SDL_TEMPLATES,
+  alignSdlPricingDenomsToEscrow,
+  getSdlTemplate,
+  isSdlTemplateId,
+  type SdlTemplateId,
+} from "./akash/defaultSdl";
 import {
   closeDeploymentTx,
   createFullSdk,
@@ -57,6 +64,7 @@ type WalletBalanceSnapshot = { uakt: string; deploymentEscrow: string };
 type Persisted = {
   network: NetworkMode;
   yaml: string;
+  sdlTemplate?: SdlTemplateId | "custom";
   dseq?: string;
   rest?: string;
   rpc?: string;
@@ -65,6 +73,7 @@ type Persisted = {
 type LedState = "idle" | "ok" | "fail";
 type LeaseView = "open" | "closed";
 type DeploymentTxLink = TxBroadcastSummary & { label: string };
+type SelectedSdlTemplate = SdlTemplateId | "custom";
 
 function shortenAddress(value: string): string {
   return value.length > 16 ? `${value.slice(0, 10)}...${value.slice(-8)}` : value;
@@ -171,6 +180,13 @@ export default function App() {
   const [probeMeta, setProbeMeta] = useState<{ rest?: string; rpc?: string }>({});
   const [probing, setProbing] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const initialSelectedSdlTemplate = useMemo<SelectedSdlTemplate>(() => {
+    const persisted = loadPersisted();
+    if (persisted?.sdlTemplate === "custom") return "custom";
+    return isSdlTemplateId(persisted?.sdlTemplate) ? persisted.sdlTemplate : DEFAULT_SDL_TEMPLATE_ID;
+  }, []);
+  const [selectedSdlTemplate, setSelectedSdlTemplate] =
+    useState<SelectedSdlTemplate>(initialSelectedSdlTemplate);
 
   const endpoints = useMemo(() => {
     const base = getEndpoints(network);
@@ -183,7 +199,12 @@ export default function App() {
   const [yamlText, setYamlText] = useState(() => {
     const persisted = loadPersisted()?.yaml;
     const net = persistedNetRef.current!.network;
-    const raw = persisted ?? getDefaultSdl(net);
+    const raw =
+      persisted ??
+      getSdlTemplate(
+        net,
+        initialSelectedSdlTemplate === "custom" ? DEFAULT_SDL_TEMPLATE_ID : initialSelectedSdlTemplate
+      );
     const esc = getEndpoints(net).deploymentEscrowMinimalDenom;
     return alignSdlPricingDenomsToEscrow(raw, esc);
   });
@@ -298,11 +319,12 @@ export default function App() {
     savePersisted({
       network,
       yaml: yamlText,
+      sdlTemplate: selectedSdlTemplate,
       dseq: dseq ?? undefined,
       rest: restInput,
       rpc: rpcInput,
     });
-  }, [network, yamlText, dseq, restInput, rpcInput]);
+  }, [network, yamlText, selectedSdlTemplate, dseq, restInput, rpcInput]);
 
   const runEndpointTests = useCallback(async () => {
     setProbing(true);
@@ -563,28 +585,50 @@ export default function App() {
     [address, endpoints, pushLog, signer, walletKind]
   );
 
-  const selectNetwork = useCallback((nextNetwork: NetworkMode) => {
-    setNetwork(nextNetwork);
-    const defaults = getEndpoints(nextNetwork);
-    setRestInput(defaults.rest);
-    setRpcInput(defaults.rpc);
-    setRestLed("idle");
-    setRpcLed("idle");
-    setProbeMeta({});
-    setAddress(null);
-    setSigner(null);
-    setWalletKind(null);
-    setWalletBalances(EMPTY_WALLET_BALANCES);
-    setCurrentLeases(null);
-    setCurrentLeasesError(null);
-    setYamlText(getDefaultSdl(nextNetwork));
+  const selectSdlTemplate = useCallback(
+    (templateId: SdlTemplateId) => {
+      setSelectedSdlTemplate(templateId);
+      setYamlText(getSdlTemplate(network, templateId));
+    },
+    [network]
+  );
+
+  const editYamlText = useCallback((nextYaml: string) => {
+    setSelectedSdlTemplate("custom");
+    setYamlText(nextYaml);
   }, []);
+
+  const selectNetwork = useCallback(
+    (nextNetwork: NetworkMode) => {
+      setNetwork(nextNetwork);
+      const defaults = getEndpoints(nextNetwork);
+      const nextTemplate = selectedSdlTemplate === "custom" ? DEFAULT_SDL_TEMPLATE_ID : selectedSdlTemplate;
+      setRestInput(defaults.rest);
+      setRpcInput(defaults.rpc);
+      setRestLed("idle");
+      setRpcLed("idle");
+      setProbeMeta({});
+      setAddress(null);
+      setSigner(null);
+      setWalletKind(null);
+      setWalletBalances(EMPTY_WALLET_BALANCES);
+      setCurrentLeases(null);
+      setCurrentLeasesError(null);
+      setSelectedSdlTemplate(nextTemplate);
+      setYamlText(getSdlTemplate(nextNetwork, nextTemplate));
+    },
+    [selectedSdlTemplate]
+  );
 
   const hasLeaseSection = address !== null && currentLeases !== null;
   const walletSectionNumber = 1;
   const leasesSectionNumber = 2;
   const sdlSectionNumber = hasLeaseSection ? 3 : 2;
   const deploySectionNumber = hasLeaseSection ? 4 : 3;
+  const activeSdlTemplate =
+    selectedSdlTemplate === "custom"
+      ? null
+      : SDL_TEMPLATES.find((template) => template.id === selectedSdlTemplate) ?? null;
 
   return (
     <div className="app">
@@ -1216,12 +1260,36 @@ export default function App() {
 
       <section className="card">
         <h2>{sdlSectionNumber}. Stack Definition (SDL)</h2>
+        <div className="sdl-template-row">
+          <label className="sdl-template-label" htmlFor="sdl-template">
+            Template
+          </label>
+          <select
+            id="sdl-template"
+            className="sdl-template-select"
+            value={selectedSdlTemplate}
+            onChange={(e) => {
+              const value = e.target.value;
+              if (isSdlTemplateId(value)) selectSdlTemplate(value);
+            }}
+          >
+            {selectedSdlTemplate === "custom" ? <option value="custom">Custom SDL</option> : null}
+            {SDL_TEMPLATES.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name}
+              </option>
+            ))}
+          </select>
+          <span className="muted small sdl-template-description">
+            {activeSdlTemplate?.description ?? "Edited SDL. Pick a template to replace the editor content."}
+          </span>
+        </div>
         <p className="muted small sdl-escrow-hint">
           Default SDL pricing and the create-deployment deposit use{" "}
           <strong>{endpoints.deploymentEscrowCoinDenom}</strong> (<code>{endpoints.deploymentEscrowMinimalDenom}</code>
           ). Gas remains <strong>AKT</strong> (<code>uakt</code>).
         </p>
-        <textarea value={yamlText} onChange={(e) => setYamlText(e.target.value)} rows={18} className="sdl" />
+        <textarea value={yamlText} onChange={(e) => editYamlText(e.target.value)} rows={18} className="sdl" />
         {preview.ok ? (
           <div className="preview ok">
             <h3>What will be deployed</h3>

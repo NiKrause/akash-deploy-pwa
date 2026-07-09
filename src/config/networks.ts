@@ -66,7 +66,7 @@ export function getTestnetFaucetUrls(): string[] {
 }
 
 function env(name: string, fallback: string): string {
-  const v = import.meta.env[name];
+  const v = import.meta.env?.[name];
   return typeof v === "string" && v.length > 0 ? v : fallback;
 }
 

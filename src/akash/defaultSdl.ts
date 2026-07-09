@@ -1,4 +1,13 @@
-import { getEndpoints, type NetworkMode } from "../config/networks";
+import { getEndpoints, type NetworkMode } from "../config/networks.ts";
+
+export type SdlTemplateId = "ucan-store" | "nginx-smoke";
+
+type SdlTemplate = {
+  id: SdlTemplateId;
+  name: string;
+  description: string;
+  render: (mode: NetworkMode) => string;
+};
 
 /**
  * Align legacy `uakt` / `uact` placement pricing lines to the escrow denom this build uses,
@@ -11,8 +20,49 @@ export function alignSdlPricingDenomsToEscrow(yaml: string, escrowDenom: string)
     .replace(/denom:\s*'(?:uakt|uact)'/g, `denom: '${escrowDenom}'`);
 }
 
-/** Default smoke-test SDL (nginx). Placement pricing denom follows deployment escrow. */
-export function getDefaultSdl(mode: NetworkMode): string {
+function renderUcanStoreSdl(mode: NetworkMode): string {
+  const d = getEndpoints(mode).deploymentEscrowMinimalDenom;
+  return `version: "2.0"
+
+services:
+  ucan-store:
+    image: ghcr.io/nomadkids/ucan-store-akash:latest
+    expose:
+      - port: 8080
+        as: 80
+        to:
+          - global: true
+    env:
+      - UCAN_STORE_PUBLIC_ORIGIN=
+      - UCAN_STORE_DATA_DIR=/data/ucan-store
+      - IPFS_PATH=/data/ipfs
+
+profiles:
+  compute:
+    ucan-store:
+      resources:
+        cpu:
+          units: 1
+        memory:
+          size: 1Gi
+        storage:
+          - size: 10Gi
+  placement:
+    dcloud:
+      pricing:
+        ucan-store:
+          denom: ${d}
+          amount: 1000
+
+deployment:
+  ucan-store:
+    dcloud:
+      profile: ucan-store
+      count: 1
+`;
+}
+
+function renderNginxSmokeSdl(mode: NetworkMode): string {
   const d = getEndpoints(mode).deploymentEscrowMinimalDenom;
   return `version: "2.0"
 
@@ -48,6 +98,37 @@ deployment:
       profile: web
       count: 1
 `;
+}
+
+export const DEFAULT_SDL_TEMPLATE_ID: SdlTemplateId = "ucan-store";
+
+export const SDL_TEMPLATES: SdlTemplate[] = [
+  {
+    id: "ucan-store",
+    name: "UCAN Store",
+    description: "Real UCAN Store workload from the akash branch: web UI, upload API, IPFS/Kubo, and Caddy.",
+    render: renderUcanStoreSdl,
+  },
+  {
+    id: "nginx-smoke",
+    name: "Nginx smoke test",
+    description: "Tiny nginx deployment for checking wallet, bidding, lease creation, and provider access.",
+    render: renderNginxSmokeSdl,
+  },
+];
+
+export function isSdlTemplateId(value: unknown): value is SdlTemplateId {
+  return typeof value === "string" && SDL_TEMPLATES.some((template) => template.id === value);
+}
+
+export function getSdlTemplate(mode: NetworkMode, templateId: SdlTemplateId = DEFAULT_SDL_TEMPLATE_ID): string {
+  const template = SDL_TEMPLATES.find((candidate) => candidate.id === templateId) ?? SDL_TEMPLATES[0];
+  return template.render(mode);
+}
+
+/** Default SDL. Placement pricing denom follows deployment escrow. */
+export function getDefaultSdl(mode: NetworkMode): string {
+  return getSdlTemplate(mode, DEFAULT_SDL_TEMPLATE_ID);
 }
 
 /** Mainnet default (backward compatible export). */

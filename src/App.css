@@ -544,6 +544,41 @@ button.deploy {
   font-size: 1rem;
 }
 
+.sdl-template-row {
+  display: grid;
+  grid-template-columns: auto minmax(11rem, 16rem) 1fr;
+  align-items: center;
+  gap: 0.45rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.sdl-template-label {
+  color: #cbd5e1;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.sdl-template-select {
+  width: 100%;
+  min-height: 2.1rem;
+  color: #e2e8f0;
+  background: #020617;
+  border: 1px solid #334155;
+  border-radius: 0.35rem;
+  padding: 0.35rem 0.55rem;
+  font: inherit;
+}
+
+.sdl-template-description {
+  line-height: 1.35;
+}
+
+@media (max-width: 42rem) {
+  .sdl-template-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .sdl-escrow-hint {
   margin: 0 0 0.5rem;
   line-height: 1.45;
