@@ -9,6 +9,15 @@ type SdlTemplate = {
   render: (mode: NetworkMode) => string;
 };
 
+function env(name: string): string {
+  const v = import.meta.env?.[name];
+  return typeof v === "string" ? v.trim() : "";
+}
+
+function yamlSingleQuoted(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 /**
  * Align legacy `uakt` / `uact` placement pricing lines to the escrow denom this build uses,
  * so persisted session YAML matches `getEndpoints(mode).deploymentEscrowMinimalDenom`.
@@ -22,6 +31,19 @@ export function alignSdlPricingDenomsToEscrow(yaml: string, escrowDenom: string)
 
 function renderUcanStoreSdl(mode: NetworkMode): string {
   const d = getEndpoints(mode).deploymentEscrowMinimalDenom;
+  const sshPublicKey = env("VITE_UCAN_STORE_SSH_PUBLIC_KEY");
+  const sshExpose = sshPublicKey
+    ? `
+      - port: 22
+        as: 22
+        to:
+          - global: true`
+    : "";
+  const sshEnv = sshPublicKey
+    ? `
+      - ${yamlSingleQuoted(`UCAN_STORE_SSH_AUTHORIZED_KEYS=${sshPublicKey}`)}`
+    : "";
+
   return `version: "2.0"
 
 services:
@@ -31,11 +53,11 @@ services:
       - port: 8080
         as: 80
         to:
-          - global: true
+          - global: true${sshExpose}
     env:
       - UCAN_STORE_PUBLIC_ORIGIN=
       - UCAN_STORE_DATA_DIR=/data/ucan-store
-      - IPFS_PATH=/data/ipfs
+      - IPFS_PATH=/data/ipfs${sshEnv}
 
 profiles:
   compute:

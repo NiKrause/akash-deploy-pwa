@@ -13,6 +13,8 @@ interface ImportMetaEnv {
   readonly VITE_TESTNET_FAUCET_ALT_URL?: string;
   /** Comma-separated faucet URLs; when set, overrides primary + alternate. */
   readonly VITE_TESTNET_FAUCET_URLS?: string;
+  /** Optional public SSH key for debug access to the UCAN Store SDL template. */
+  readonly VITE_UCAN_STORE_SSH_PUBLIC_KEY?: string;
 }
 
 interface ImportMeta {

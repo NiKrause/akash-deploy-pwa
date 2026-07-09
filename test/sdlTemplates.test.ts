@@ -14,6 +14,12 @@ test("UCAN Store is the default SDL template", () => {
   assert.match(getDefaultSdl("mainnet"), /ghcr\.io\/nomadkids\/ucan-store-akash:latest/);
 });
 
+test("UCAN Store SSH exposure is opt-in", () => {
+  const sdl = getDefaultSdl("mainnet");
+  assert.doesNotMatch(sdl, /UCAN_STORE_SSH_AUTHORIZED_KEYS/);
+  assert.doesNotMatch(sdl, /port: 22/);
+});
+
 test("all SDL templates align pricing denom to the selected network escrow denom", () => {
   const escrowDenom = getEndpoints("mainnet").deploymentEscrowMinimalDenom;
   for (const template of SDL_TEMPLATES) {
