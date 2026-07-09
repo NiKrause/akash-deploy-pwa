@@ -94,7 +94,7 @@ function compareDecimalStrings(a: string | undefined | null, b: string | undefin
 
 function readPersistedNetworkFields(): { network: NetworkMode; rest: string; rpc: string } {
   const p = loadPersisted();
-  const net = (p?.network ?? "sandbox") as NetworkMode;
+  const net = (p?.network ?? "mainnet") as NetworkMode;
   const d = getEndpoints(net);
   const rawRest = p?.rest ?? d.rest;
   const rawRpc = p?.rpc ?? d.rpc;
@@ -170,6 +170,7 @@ export default function App() {
   const [rpcLed, setRpcLed] = useState<LedState>("idle");
   const [probeMeta, setProbeMeta] = useState<{ rest?: string; rpc?: string }>({});
   const [probing, setProbing] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const endpoints = useMemo(() => {
     const base = getEndpoints(network);
@@ -562,6 +563,29 @@ export default function App() {
     [address, endpoints, pushLog, signer, walletKind]
   );
 
+  const selectNetwork = useCallback((nextNetwork: NetworkMode) => {
+    setNetwork(nextNetwork);
+    const defaults = getEndpoints(nextNetwork);
+    setRestInput(defaults.rest);
+    setRpcInput(defaults.rpc);
+    setRestLed("idle");
+    setRpcLed("idle");
+    setProbeMeta({});
+    setAddress(null);
+    setSigner(null);
+    setWalletKind(null);
+    setWalletBalances(EMPTY_WALLET_BALANCES);
+    setCurrentLeases(null);
+    setCurrentLeasesError(null);
+    setYamlText(getDefaultSdl(nextNetwork));
+  }, []);
+
+  const hasLeaseSection = address !== null && currentLeases !== null;
+  const walletSectionNumber = 1;
+  const leasesSectionNumber = 2;
+  const sdlSectionNumber = hasLeaseSection ? 3 : 2;
+  const deploySectionNumber = hasLeaseSection ? 4 : 3;
+
   return (
     <div className="app">
       <header className="header">
@@ -623,30 +647,30 @@ export default function App() {
         </p>
       </header>
 
+      <section className="advanced-network">
+        <button
+          type="button"
+          className="secondary advanced-toggle"
+          aria-expanded={advancedOpen}
+          onClick={() => setAdvancedOpen((open) => !open)}
+        >
+          Advanced network
+        </button>
+        <span className="muted small advanced-network-summary">
+          {endpoints.chainName} · <code>{endpoints.chainId}</code>
+        </span>
+      </section>
+
+      {advancedOpen ? (
       <section className="card">
-        <h2>1. Network</h2>
+        <h2>Advanced Network</h2>
         <div className="row">
           <label>
             <input
               type="radio"
               name="net"
               checked={network === "sandbox"}
-              onChange={() => {
-                setNetwork("sandbox");
-                const d = getEndpoints("sandbox");
-                setRestInput(d.rest);
-                setRpcInput(d.rpc);
-                setRestLed("idle");
-                setRpcLed("idle");
-                setProbeMeta({});
-                setAddress(null);
-                setSigner(null);
-                setWalletKind(null);
-                setWalletBalances(EMPTY_WALLET_BALANCES);
-                setCurrentLeases(null);
-                setCurrentLeasesError(null);
-                setYamlText(getDefaultSdl("sandbox"));
-              }}
+              onChange={() => selectNetwork("sandbox")}
             />{" "}
             Sandbox (recommended for testing)
           </label>
@@ -655,22 +679,7 @@ export default function App() {
               type="radio"
               name="net"
               checked={network === "mainnet"}
-              onChange={() => {
-                setNetwork("mainnet");
-                const d = getEndpoints("mainnet");
-                setRestInput(d.rest);
-                setRpcInput(d.rpc);
-                setRestLed("idle");
-                setRpcLed("idle");
-                setProbeMeta({});
-                setAddress(null);
-                setSigner(null);
-                setWalletKind(null);
-                setWalletBalances(EMPTY_WALLET_BALANCES);
-                setCurrentLeases(null);
-                setCurrentLeasesError(null);
-                setYamlText(getDefaultSdl("mainnet"));
-              }}
+              onChange={() => selectNetwork("mainnet")}
             />{" "}
             Mainnet
           </label>
@@ -679,22 +688,7 @@ export default function App() {
               type="radio"
               name="net"
               checked={network === "testnet"}
-              onChange={() => {
-                setNetwork("testnet");
-                const d = getEndpoints("testnet");
-                setRestInput(d.rest);
-                setRpcInput(d.rpc);
-                setRestLed("idle");
-                setRpcLed("idle");
-                setProbeMeta({});
-                setAddress(null);
-                setSigner(null);
-                setWalletKind(null);
-                setWalletBalances(EMPTY_WALLET_BALANCES);
-                setCurrentLeases(null);
-                setCurrentLeasesError(null);
-                setYamlText(getDefaultSdl("testnet"));
-              }}
+              onChange={() => selectNetwork("testnet")}
             />{" "}
             Testnet (BME / testnet-oracle)
           </label>
@@ -759,9 +753,10 @@ export default function App() {
           </span>
         </div>
       </section>
+      ) : null}
 
       <section className="card">
-        <h2>2. Wallet</h2>
+        <h2>{walletSectionNumber}. Wallet</h2>
         {!address ? (
           <div className="row">
             <button type="button" onClick={() => void onConnect("keplr")}>
@@ -910,7 +905,7 @@ export default function App() {
 
       {address && currentLeases ? (
         <section className="card">
-          <h2>3. Current Leases</h2>
+          <h2>{leasesSectionNumber}. Current Leases</h2>
           <p className="muted small">
             Deployments hold escrow in {endpoints.deploymentEscrowMinimalDenom}. Closing unused deployments should return
             that ACT to your spendable balance; AKT gas is not refundable.
@@ -1220,7 +1215,7 @@ export default function App() {
       ) : null}
 
       <section className="card">
-        <h2>{address && currentLeases ? "4. Stack Definition (SDL)" : "3. Stack Definition (SDL)"}</h2>
+        <h2>{sdlSectionNumber}. Stack Definition (SDL)</h2>
         <p className="muted small sdl-escrow-hint">
           Default SDL pricing and the create-deployment deposit use{" "}
           <strong>{endpoints.deploymentEscrowCoinDenom}</strong> (<code>{endpoints.deploymentEscrowMinimalDenom}</code>
@@ -1251,7 +1246,7 @@ export default function App() {
       </section>
 
       <section className="card">
-        <h2>{address && currentLeases ? "5. Deploy" : "4. Deploy"}</h2>
+        <h2>{deploySectionNumber}. Deploy</h2>
         <p className="what-next">
           <strong>What happens next:</strong> (1) Ensure an on-chain client certificate. (2) Create deployment and escrow
           deposit in <code>{endpoints.deploymentEscrowMinimalDenom}</code> ({endpoints.deploymentEscrowCoinDenom}). (3)

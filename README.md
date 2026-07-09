@@ -15,12 +15,12 @@ Open the app over **HTTPS** or `localhost` so the wallet extension can inject (`
 
 1. Install [Keplr](https://www.keplr.app/) (or Leap). Switch network to **Akash Sandbox** after the app suggests the chain (Keplr: approve the chain suggestion).
 2. Fund the wallet with sandbox **uakt** from the official sandbox faucet (see [Akash docs — SDK quick start](https://akash.network/docs/api-documentation/sdk/quick-start/) for the current faucet URL).
-3. In the app, leave **Sandbox** selected, connect the wallet, optionally edit the SDL, then **Deploy**.
+3. In the app, open **Advanced network**, choose **Sandbox**, connect the wallet, optionally edit the SDL, then **Deploy**.
 4. Approve transactions in the wallet when prompted (certificate, deployment, lease). Manifest upload uses a **JWT** signed via the wallet’s amino signer.
 
 ## Mainnet
 
-Choose **Mainnet** in the UI (this clears the connected wallet so you reconnect against mainnet RPC/REST). You need real **AKT** for gas and deployment escrow. Override RPC/REST via env vars (see `.env.example`).
+Mainnet is the default network. You need real **AKT** for gas and deployment escrow. Override RPC/REST via env vars or the **Advanced network** panel (see `.env.example`).
 
 ## BME testnet (`testnet-oracle`)
 

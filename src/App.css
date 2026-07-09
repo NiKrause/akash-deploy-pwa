@@ -113,6 +113,25 @@
   line-height: 1.5;
 }
 
+.advanced-network {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.8rem;
+  margin: 1rem 0;
+}
+
+.advanced-toggle {
+  border: 1px solid #334155;
+}
+
+.advanced-network-summary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 .wallet-address-row {
   margin: 0;
   word-break: break-all;
