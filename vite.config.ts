@@ -1,8 +1,17 @@
+import { createRequire } from "node:module";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
+const require = createRequire(import.meta.url);
+const pkg = require("./package.json") as { version: string };
+const repositoryUrl = "https://github.com/NiKrause/akash-deploy-pwa";
+
 export default defineConfig({
+  define: {
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(pkg.version),
+    "import.meta.env.VITE_REPOSITORY_URL": JSON.stringify(repositoryUrl),
+  },
   plugins: [
     react(),
     VitePWA({

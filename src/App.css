@@ -17,11 +17,33 @@
   margin-bottom: 0.5rem;
 }
 
+.header-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.45rem 0.65rem;
+}
+
 .header h1 {
   margin: 0;
   font-size: 1.5rem;
   font-weight: 600;
   line-height: 1.2;
+}
+
+.app-version {
+  color: #94a3b8;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+}
+
+.header-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem 0.85rem;
+  margin-left: auto;
 }
 
 .header-faucets {
@@ -31,6 +53,28 @@
   gap: 0.35rem 0.65rem;
   max-width: 28rem;
   justify-content: flex-end;
+}
+
+.github-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  color: #cbd5e1;
+  border: 1px solid #263449;
+  border-radius: 0.45rem;
+  text-decoration: none;
+}
+
+.github-link:hover {
+  color: #f8fafc;
+  border-color: #7dd3fc;
+}
+
+.github-link svg {
+  width: 1.15rem;
+  height: 1.15rem;
 }
 
 .header-faucets-label {
