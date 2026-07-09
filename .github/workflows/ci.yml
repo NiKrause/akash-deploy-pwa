@@ -77,6 +77,18 @@ jobs:
             echo "| Lint | $(icon "$LINT_RESULT") $LINT_RESULT | \`npm run lint\` |"
             echo "| Build | $(icon "$BUILD_RESULT") $BUILD_RESULT | \`npm run build\` |"
             echo
+            echo "## What the tests cover"
+            echo
+            echo "| Area | Test file | Coverage |"
+            echo "| --- | --- | --- |"
+            echo "| SDL validation | \`test/deployValidation.test.ts\` | Ensures SDL pricing denoms are collected and must match the deployment escrow denom before signing. |"
+            echo "| Amount formatting | \`test/microAmount.test.ts\` | Checks micro-denom display formatting and positive escrow detection. |"
+            echo "| Provider HTTP client | \`test/providerHttp.test.ts\` | Verifies provider URL normalization, proxy URL generation, proxy routing, and helpful CORS/mixed-content errors. |"
+            echo "| Provider proxy Worker | \`test/providerProxyWorker.test.ts\` | Confirms the Worker rejects unsafe targets and only forwards allowed Akash manifest/status requests with CORS headers. |"
+            echo "| Lease access parser | \`test/leaseAccessParser.test.ts\` | Parses provider status responses where services may be keyed objects or missing explicit names. |"
+            echo "| Lease overview filter | \`test/leaseOverview.test.ts\` | Keeps active/open/reclaimable deployments visible and hides terminal insufficient-funds history. |"
+            echo "| Block timestamps | \`test/tendermintBlock.test.ts\` | Fetches Tendermint block times for deployment-created dates and skips invalid heights. |"
+            echo
             echo "| Metadata | Value |"
             echo "| --- | --- |"
             echo "| Version | \`$app_version\` |"
