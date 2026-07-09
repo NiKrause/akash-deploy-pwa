@@ -34,10 +34,58 @@ jobs:
         run: npm ci
 
       - name: Run tests
+        id: tests
+        continue-on-error: true
         run: npm test
 
       - name: Run lint
+        id: lint
+        continue-on-error: true
         run: npm run lint
 
       - name: Build
+        id: build
+        continue-on-error: true
         run: npm run build
+
+      - name: Write summary
+        if: always()
+        env:
+          TESTS_RESULT: ${{ steps.tests.outcome }}
+          LINT_RESULT: ${{ steps.lint.outcome }}
+          BUILD_RESULT: ${{ steps.build.outcome }}
+        run: |
+          icon() {
+            case "$1" in
+              success) printf "✅" ;;
+              failure) printf "❌" ;;
+              cancelled) printf "🚫" ;;
+              skipped) printf "⏭️" ;;
+              *) printf "❔" ;;
+            esac
+          }
+
+          app_version="$(node -p "require('./package.json').version")"
+          short_sha="${GITHUB_SHA::7}"
+
+          {
+            echo "# Akash Deploy PWA CI"
+            echo
+            echo "| Check | Result | Command |"
+            echo "| --- | --- | --- |"
+            echo "| Tests | $(icon "$TESTS_RESULT") $TESTS_RESULT | \`npm test\` |"
+            echo "| Lint | $(icon "$LINT_RESULT") $LINT_RESULT | \`npm run lint\` |"
+            echo "| Build | $(icon "$BUILD_RESULT") $BUILD_RESULT | \`npm run build\` |"
+            echo
+            echo "| Metadata | Value |"
+            echo "| --- | --- |"
+            echo "| Version | \`$app_version\` |"
+            echo "| Event | \`$GITHUB_EVENT_NAME\` |"
+            echo "| Branch/ref | \`$GITHUB_REF_NAME\` |"
+            echo "| Commit | \`$short_sha\` |"
+            echo "| Node | \`$(node --version)\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if checks failed
+        if: steps.tests.outcome != 'success' || steps.lint.outcome != 'success' || steps.build.outcome != 'success'
+        run: exit 1
