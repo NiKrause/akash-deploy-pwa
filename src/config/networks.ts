@@ -22,8 +22,12 @@ export interface AkashEndpoints {
   explorerHomeUrl: string;
   /** Replace `${accountAddress}` with the `akash1…` address. */
   explorerAccountUrlTemplate: string;
+  /** Replace `${txHash}` with the transaction hash. Empty when no known explorer tx route exists. */
+  explorerTxUrlTemplate: string;
   /** Short label for the explorer link. */
   explorerLabel: string;
+  /** Optional same-origin/CORS provider proxy for manifest upload and lease status. */
+  providerProxyUrl: string;
 }
 
 /** Build account URL from template (`…${accountAddress}…`). */
@@ -31,6 +35,11 @@ export function accountExplorerUrl(template: string, address: string): string {
   return template.includes("${accountAddress}")
     ? template.split("${accountAddress}").join(encodeURIComponent(address))
     : template;
+}
+
+/** Build transaction URL from template (`…${txHash}…`). */
+export function txExplorerUrl(template: string, txHash: string): string {
+  return template.includes("${txHash}") ? template.split("${txHash}").join(encodeURIComponent(txHash)) : template;
 }
 
 /**
@@ -67,6 +76,10 @@ function deploymentEscrowFromEnv(): { minimalDenom: string; coinDenom: string } 
   return { minimalDenom, coinDenom };
 }
 
+function providerProxyUrlFromEnv(): string {
+  return env("VITE_PROVIDER_PROXY_URL", "").trim().replace(/\/+$/, "");
+}
+
 /**
  * Defaults align with `@akashnetwork/chain-sdk` sandbox examples,
  * [Cosmos chain-registry](https://github.com/cosmos/chain-registry/tree/master/akash) mainnet APIs,
@@ -75,6 +88,7 @@ function deploymentEscrowFromEnv(): { minimalDenom: string; coinDenom: string } 
  */
 export function getEndpoints(mode: NetworkMode): AkashEndpoints {
   const depEsc = deploymentEscrowFromEnv();
+  const providerProxyUrl = providerProxyUrlFromEnv();
   if (mode === "sandbox") {
     return {
       mode,
@@ -98,7 +112,9 @@ export function getEndpoints(mode: NetworkMode): AkashEndpoints {
         "VITE_SANDBOX_EXPLORER_ACCOUNT",
         "https://explorer.sandbox-2.aksh.pw/akash/account/${accountAddress}"
       ),
+      explorerTxUrlTemplate: env("VITE_SANDBOX_EXPLORER_TX", "https://explorer.sandbox-2.aksh.pw/akash/tx/${txHash}"),
       explorerLabel: env("VITE_SANDBOX_EXPLORER_LABEL", "Sandbox explorer"),
+      providerProxyUrl,
     };
   }
   if (mode === "testnet") {
@@ -128,7 +144,9 @@ export function getEndpoints(mode: NetworkMode): AkashEndpoints {
         "https://github.com/akash-network/net/tree/main/testnet-oracle"
       ),
       explorerAccountUrlTemplate: env("VITE_TESTNET_EXPLORER_ACCOUNT", ""),
+      explorerTxUrlTemplate: env("VITE_TESTNET_EXPLORER_TX", ""),
       explorerLabel: env("VITE_TESTNET_EXPLORER_LABEL", "Testnet config (GitHub)"),
+      providerProxyUrl,
     };
   }
   return {
@@ -153,7 +171,9 @@ export function getEndpoints(mode: NetworkMode): AkashEndpoints {
       "VITE_MAINNET_EXPLORER_ACCOUNT",
       "https://www.mintscan.io/akash/accounts/${accountAddress}"
     ),
+    explorerTxUrlTemplate: env("VITE_MAINNET_EXPLORER_TX", "https://www.mintscan.io/akash/tx/${txHash}"),
     explorerLabel: env("VITE_MAINNET_EXPLORER_LABEL", "Mintscan"),
+    providerProxyUrl,
   };
 }
 

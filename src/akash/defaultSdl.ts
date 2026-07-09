@@ -11,14 +11,14 @@ export function alignSdlPricingDenomsToEscrow(yaml: string, escrowDenom: string)
     .replace(/denom:\s*'(?:uakt|uact)'/g, `denom: '${escrowDenom}'`);
 }
 
-/** Default hello-world SDL (nginx). Placement pricing denom follows deployment escrow. */
+/** Default smoke-test SDL (nginx). Placement pricing denom follows deployment escrow. */
 export function getDefaultSdl(mode: NetworkMode): string {
   const d = getEndpoints(mode).deploymentEscrowMinimalDenom;
   return `version: "2.0"
 
 services:
   web:
-    image: nginx:1.25.3
+    image: nginx:1.27-alpine
     expose:
       - port: 80
         as: 80
@@ -40,7 +40,7 @@ profiles:
       pricing:
         web:
           denom: ${d}
-          amount: 1000
+          amount: 10000
 
 deployment:
   web:

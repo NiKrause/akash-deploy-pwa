@@ -194,6 +194,23 @@
   margin-top: 0.9rem;
 }
 
+.lease-view-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
+button.lease-view-tab {
+  border: 1px solid #334155;
+}
+
+button.lease-view-tab-active {
+  background: #7dd3fc;
+  color: #020617;
+  border-color: #7dd3fc;
+}
+
 .lease-card {
   border: 1px solid #263449;
   border-radius: 0.7rem;
@@ -212,6 +229,27 @@
 .lease-meta {
   margin: 0.35rem 0 0;
   line-height: 1.45;
+}
+
+.lease-explorer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.7rem;
+  margin-top: 0.45rem;
+  font-size: 0.78rem;
+}
+
+.lease-explorer-links a {
+  color: #7dd3fc;
+  text-decoration: none;
+}
+
+.lease-explorer-links a:hover {
+  text-decoration: underline;
+}
+
+.lease-explorer-links code {
+  color: #cbd5e1;
 }
 
 .lease-lines {
@@ -425,6 +463,11 @@ button:disabled {
 button.secondary {
   background: #334155;
   color: #f1f5f9;
+}
+
+button.danger {
+  background: #7f1d1d;
+  color: #fee2e2;
 }
 
 button.tiny {

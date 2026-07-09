@@ -4,6 +4,7 @@ import {
   getEndpoints,
   getTestnetFaucetUrls,
   sanitizePersistedRpcRest,
+  txExplorerUrl,
   type NetworkMode,
 } from "./config/networks";
 import { alignSdlPricingDenomsToEscrow, getDefaultSdl } from "./akash/defaultSdl";
@@ -25,7 +26,9 @@ import {
   type LeaseAccessDetails,
   type CurrentLeasesOverview,
   type DeployStep,
+  type TxBroadcastSummary,
 } from "./akash/deployService";
+import { deploymentHasActiveLease, deploymentIsOpenOrReclaimable } from "./akash/leaseOverview";
 import { connectWallet, type WalletKind } from "./wallet/keplr";
 import { probeRestGateway, probeTendermintRpc } from "./lib/endpointConnectivity";
 import {
@@ -34,6 +37,8 @@ import {
   formatUsd,
   uaktStringToAktNumber,
 } from "./lib/aktMarket";
+import { formatMicroAmount, isPositiveMicroAmountString } from "./lib/microAmount";
+import { fetchTendermintBlockTime } from "./lib/tendermintBlock";
 import "./App.css";
 
 /** Akash sandbox-2 public faucet (AKT / uakt). */
@@ -56,25 +61,8 @@ type Persisted = {
 };
 
 type LedState = "idle" | "ok" | "fail";
-
-function formatMicroAmount(raw: string | null): string | null {
-  if (raw == null || raw === "") return null;
-  const s = raw.trim().replace(/,/g, "");
-  if (!/^\d+$/.test(s)) return null;
-  const n = BigInt(s);
-  const whole = n / 1_000_000n;
-  const rem = n % 1_000_000n;
-  const frac = rem.toString().padStart(6, "0").replace(/0+$/, "");
-  const wholeText = whole.toLocaleString("en-US");
-  return frac ? `${wholeText}.${frac}` : wholeText;
-}
-
-/** `lockedEscrowAmount` from the indexer is an integer string in the deployment-escrow minimal denom (see `findDecCoinAmount` in deployService). */
-function isPositiveMicroAmountString(raw: string): boolean {
-  const s = raw.trim().replace(/,/g, "");
-  if (!/^\d+$/.test(s)) return false;
-  return BigInt(s) > 0n;
-}
+type LeaseView = "open" | "closed";
+type DeploymentTxLink = TxBroadcastSummary & { label: string };
 
 function shortenAddress(value: string): string {
   return value.length > 16 ? `${value.slice(0, 10)}...${value.slice(-8)}` : value;
@@ -126,6 +114,48 @@ function savePersisted(p: Persisted) {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(p));
 }
 
+function deploymentCreatedAtKey(createdAt: string): string {
+  return createdAt.trim();
+}
+
+function formatDeploymentCreatedAt(createdAt: string, blockTimeIso: string | undefined): string {
+  const height = deploymentCreatedAtKey(createdAt);
+  if (!height) return "Created time unavailable";
+  const blockLabel = `block ${height}`;
+  if (!blockTimeIso) return `Created at ${blockLabel}`;
+  const date = new Date(blockTimeIso);
+  if (Number.isNaN(date.getTime())) return `Created at ${blockLabel}`;
+  return `Created ${date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} (${blockLabel})`;
+}
+
+function txHashShort(hash: string): string {
+  return hash.length > 18 ? `${hash.slice(0, 8)}...${hash.slice(-8)}` : hash;
+}
+
+function formatGasSummary(tx: TxBroadcastSummary): string {
+  if (tx.gasUsed && tx.gasWanted) return `gas ${tx.gasUsed}/${tx.gasWanted}`;
+  if (tx.gasUsed) return `gas used ${tx.gasUsed}`;
+  return "gas in explorer";
+}
+
+function recentAccountTxsRestUrl(restBase: string, owner: string): string {
+  const url = new URL(`${restBase.trim().replace(/\/+$/, "")}/cosmos/tx/v1beta1/txs`);
+  url.searchParams.append("events", `message.sender='${owner}'`);
+  url.searchParams.set("order_by", "ORDER_BY_DESC");
+  url.searchParams.set("pagination.limit", "50");
+  return url.toString();
+}
+
+function blockTxsRestUrl(restBase: string, height: string): string | null {
+  const h = height.trim();
+  if (!/^\d+$/.test(h)) return null;
+  const url = new URL(`${restBase.trim().replace(/\/+$/, "")}/cosmos/tx/v1beta1/txs`);
+  url.searchParams.append("events", `tx.height=${h}`);
+  url.searchParams.set("order_by", "ORDER_BY_DESC");
+  url.searchParams.set("pagination.limit", "50");
+  return url.toString();
+}
+
 export default function App() {
   const persistedNetRef = useRef<ReturnType<typeof readPersistedNetworkFields> | null>(null);
   if (persistedNetRef.current === null) {
@@ -160,6 +190,9 @@ export default function App() {
   const [walletBalances, setWalletBalances] = useState(EMPTY_WALLET_BALANCES);
   const [currentLeases, setCurrentLeases] = useState<CurrentLeasesOverview | null>(null);
   const [currentLeasesError, setCurrentLeasesError] = useState<string | null>(null);
+  const [leaseView, setLeaseView] = useState<LeaseView>("open");
+  const [blockTimeByHeight, setBlockTimeByHeight] = useState<Record<string, string>>({});
+  const [txLinksByDseq, setTxLinksByDseq] = useState<Record<string, DeploymentTxLink[]>>({});
   const [closingDeploymentDseq, setClosingDeploymentDseq] = useState<string | null>(null);
   const [leaseActionError, setLeaseActionError] = useState<string | null>(null);
   const [loadingLeaseAccessDseq, setLoadingLeaseAccessDseq] = useState<string | null>(null);
@@ -198,6 +231,15 @@ export default function App() {
     () => formatMicroAmount(currentLeases?.transferredEscrowAmount ?? null),
     [currentLeases]
   );
+  const openLeaseDeployments = useMemo(
+    () => currentLeases?.deployments.filter(deploymentIsOpenOrReclaimable) ?? [],
+    [currentLeases]
+  );
+  const closedLeaseDeployments = useMemo(
+    () => currentLeases?.deployments.filter((deployment) => !deploymentIsOpenOrReclaimable(deployment)) ?? [],
+    [currentLeases]
+  );
+  const visibleLeaseDeployments = leaseView === "open" ? openLeaseDeployments : closedLeaseDeployments;
 
   useEffect(() => {
     if (!address) {
@@ -212,6 +254,42 @@ export default function App() {
       cancelled = true;
     };
   }, [address]);
+
+  useEffect(() => {
+    const heights = Array.from(
+      new Set(
+        visibleLeaseDeployments
+          .map((deployment) => deploymentCreatedAtKey(deployment.createdAt))
+          .filter((height) => /^\d+$/.test(height))
+      )
+    ).filter((height) => !Object.prototype.hasOwnProperty.call(blockTimeByHeight, height));
+
+    if (heights.length === 0) return;
+
+    let cancelled = false;
+    void Promise.all(
+      heights.map(async (height) => {
+        try {
+          return [height, (await fetchTendermintBlockTime(endpoints.rpc, height)) ?? ""] as const;
+        } catch {
+          return [height, ""] as const;
+        }
+      })
+    ).then((entries) => {
+      if (cancelled) return;
+      setBlockTimeByHeight((existing) => {
+        const next = { ...existing };
+        for (const [height, time] of entries) {
+          next[height] = time;
+        }
+        return next;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [blockTimeByHeight, endpoints.rpc, visibleLeaseDeployments]);
 
   useEffect(() => {
     savePersisted({
@@ -247,6 +325,23 @@ export default function App() {
   const pushLog = useCallback((line: string) => {
     setLog((prev) => [...prev, line]);
   }, []);
+
+  const addDeploymentTxLink = useCallback((dseqValue: string, label: string, tx: TxBroadcastSummary | null) => {
+    if (!tx) return;
+    setTxLinksByDseq((prev) => {
+      const existing = prev[dseqValue] ?? [];
+      if (existing.some((entry) => entry.transactionHash === tx.transactionHash && entry.label === label)) return prev;
+      return { ...prev, [dseqValue]: [...existing, { ...tx, label }] };
+    });
+  }, []);
+
+  const pushTxLog = useCallback(
+    (label: string, tx: TxBroadcastSummary | null) => {
+      if (!tx) return;
+      pushLog(`${label} tx ${txHashShort(tx.transactionHash)} (${formatGasSummary(tx)})`);
+    },
+    [pushLog]
+  );
 
   const loadWalletBalancesForAddress = useCallback(
     async (addr: string): Promise<WalletBalanceSnapshot> => {
@@ -313,6 +408,7 @@ export default function App() {
     setLeaseActionError(null);
     setLeaseAccessByDseq({});
     setLeaseAccessErrorByDseq({});
+    setTxLinksByDseq({});
   }, [address, endpoints.chainId]);
 
   const onConnect = async (kind: WalletKind) => {
@@ -363,21 +459,26 @@ export default function App() {
           : `Preflight for ${owner}: ${snap.uakt} uakt (gas); ${snap.deploymentEscrow} ${endpoints.deploymentEscrowMinimalDenom} (${endpoints.deploymentEscrowCoinDenom} escrow)`
       );
       const sdk = createFullSdk(endpoints, signer);
-      await ensureClientCertificate(sdk, owner, onStep);
+      const certTx = await ensureClientCertificate(sdk, owner, onStep);
+      pushTxLog("Certificate", certTx);
       const dep = await createDeploymentTx(sdk, owner, yamlText, endpoints, onStep);
       setDseq(dep.dseq);
+      addDeploymentTxLink(dep.dseq, "Create deployment", dep.tx);
+      pushTxLog(`Create deployment ${dep.dseq}`, dep.tx);
       onStep("waiting_bids");
       const bids = await pollBids(sdk, endpoints, owner, dep.dseq);
       bids.sort((a, b) => {
         return compareDecimalStrings(a.bid?.price?.amount, b.bid?.price?.amount);
       });
       const chosen = bids[0];
-      const bidId = await createLeaseTx(sdk, chosen, onStep);
+      const leaseTx = await createLeaseTx(sdk, chosen, onStep);
+      addDeploymentTxLink(dep.dseq, "Create lease", leaseTx.tx);
+      pushTxLog(`Create lease ${dep.dseq}`, leaseTx.tx);
       await sendManifest(
         {
           owner,
           dseq: dep.dseq,
-          bidId,
+          bidId: leaseTx.bidId,
           groups: dep.groups,
           signer,
           endpoints,
@@ -412,7 +513,9 @@ export default function App() {
         if (owner !== address) setAddress(owner);
         const sdk = createFullSdk(endpoints, signer);
         pushLog(`Closing deployment ${dseqToClose}...`);
-        await closeDeploymentTx(sdk, owner, dseqToClose);
+        const tx = await closeDeploymentTx(sdk, owner, dseqToClose);
+        addDeploymentTxLink(dseqToClose, "Close deployment", tx);
+        pushTxLog(`Close deployment ${dseqToClose}`, tx);
         pushLog(`Closed deployment ${dseqToClose}. Refreshing wallet and lease overview...`);
         await loadWalletBalancesForAddress(owner);
       } catch (e) {
@@ -423,7 +526,7 @@ export default function App() {
         setClosingDeploymentDseq(null);
       }
     },
-    [address, endpoints, loadWalletBalancesForAddress, pushLog, signer]
+    [addDeploymentTxLink, address, endpoints, loadWalletBalancesForAddress, pushLog, pushTxLog, signer]
   );
 
   const onLoadLeaseAccess = useCallback(
@@ -718,7 +821,10 @@ export default function App() {
               {currentLeases ? (
                 <div className="wallet-balance-summary">
                   <span>
-                    Open deployments: <strong>{currentLeases.totalDeploymentCount}</strong>
+                    Tracked deployments: <strong>{currentLeases.totalDeploymentCount}</strong>
+                  </span>
+                  <span>
+                    Active/open shown: <strong>{openLeaseDeployments.length}</strong>
                   </span>
                   <span>
                     Active leases: <strong>{currentLeases.activeLeaseCount}</strong>
@@ -788,16 +894,49 @@ export default function App() {
             that ACT to your spendable balance; AKT gas is not refundable.
           </p>
           {leaseActionError ? <p className="error small">{leaseActionError}</p> : null}
+          {currentLeases.deployments.length > 0 ? (
+            <div className="lease-view-tabs" role="tablist" aria-label="Lease deployment filter">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={leaseView === "open"}
+                className={`secondary tiny lease-view-tab ${leaseView === "open" ? "lease-view-tab-active" : ""}`}
+                onClick={() => setLeaseView("open")}
+              >
+                Active / open ({openLeaseDeployments.length})
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={leaseView === "closed"}
+                className={`secondary tiny lease-view-tab ${leaseView === "closed" ? "lease-view-tab-active" : ""}`}
+                onClick={() => setLeaseView("closed")}
+              >
+                Inactive / closed ({closedLeaseDeployments.length})
+              </button>
+            </div>
+          ) : null}
           <div className="leases-grid">
             {currentLeases.deployments.length === 0 ? (
               <p className="muted small">No deployments found for this account on {endpoints.chainId}.</p>
+            ) : visibleLeaseDeployments.length === 0 ? (
+              <p className="muted small">
+                {leaseView === "open"
+                  ? "No active, open, or reclaimable deployments found. Closed deployments are hidden in the inactive tab."
+                  : "No fully closed deployments are hidden for this account."}
+              </p>
             ) : (
-              currentLeases.deployments.map((deployment) => {
-                const hasActiveLease = deployment.leases.some((lease) => lease.state === "active");
+              visibleLeaseDeployments.map((deployment) => {
+                const hasActiveLease = deploymentHasActiveLease(deployment);
                 const isClosing = closingDeploymentDseq === deployment.dseq;
                 const isLoadingAccess = loadingLeaseAccessDseq === deployment.dseq;
                 const accessDetails = leaseAccessByDseq[deployment.dseq];
                 const accessError = leaseAccessErrorByDseq[deployment.dseq];
+                const createdAtHeight = deploymentCreatedAtKey(deployment.createdAt);
+                const createdBlockTxsUrl = blockTxsRestUrl(endpoints.rest, createdAtHeight);
+                const accountTxsUrl = address ? accountExplorerUrl(endpoints.explorerAccountUrlTemplate, address) : "";
+                const rawAccountTxsUrl = address ? recentAccountTxsRestUrl(endpoints.rest, address) : "";
+                const exactTxLinks = txLinksByDseq[deployment.dseq] ?? [];
                 const lockedEscrowPositive = isPositiveMicroAmountString(deployment.lockedEscrowAmount);
                 const deploymentClosed = deployment.deploymentState === "closed";
                 const escrowClosed = deployment.escrowState === "closed";
@@ -815,6 +954,39 @@ export default function App() {
                     <p className="muted small lease-meta">
                       Deployment {deployment.deploymentState} · group {deployment.groupState} · escrow {deployment.escrowState}
                     </p>
+                    <p className="muted small lease-meta">
+                      {formatDeploymentCreatedAt(deployment.createdAt, blockTimeByHeight[createdAtHeight])}
+                    </p>
+                    <div className="lease-explorer-links">
+                      {accountTxsUrl ? (
+                        <a href={accountTxsUrl} target="_blank" rel="noopener noreferrer">
+                          {endpoints.explorerLabel} account txs
+                        </a>
+                      ) : null}
+                      {createdBlockTxsUrl ? (
+                        <a href={createdBlockTxsUrl} target="_blank" rel="noopener noreferrer">
+                          Raw block txs
+                        </a>
+                      ) : null}
+                      {rawAccountTxsUrl ? (
+                        <a href={rawAccountTxsUrl} target="_blank" rel="noopener noreferrer">
+                          Raw recent txs
+                        </a>
+                      ) : null}
+                      {exactTxLinks.map((tx) => {
+                        const txUrl = endpoints.explorerTxUrlTemplate
+                          ? txExplorerUrl(endpoints.explorerTxUrlTemplate, tx.transactionHash)
+                          : "";
+                        const text = `${tx.label}: ${txHashShort(tx.transactionHash)} (${formatGasSummary(tx)})`;
+                        return txUrl ? (
+                          <a key={`${tx.label}-${tx.transactionHash}`} href={txUrl} target="_blank" rel="noopener noreferrer">
+                            {text}
+                          </a>
+                        ) : (
+                          <code key={`${tx.label}-${tx.transactionHash}`}>{text}</code>
+                        );
+                      })}
+                    </div>
                     <p className="muted small lease-meta">
                       Locked {endpoints.deploymentEscrowCoinDenom}:{" "}
                       <strong>
@@ -858,6 +1030,22 @@ export default function App() {
                               </button>
                               <span className="muted small">Signs a provider JWT to read live service status.</span>
                             </div>
+                            {canOfferCloseDeployment ? (
+                              <div className="lease-actions">
+                                <button
+                                  type="button"
+                                  className="secondary danger tiny"
+                                  onClick={() => void onCloseDeployment(deployment.dseq)}
+                                  disabled={closingDeploymentDseq !== null}
+                                >
+                                  {isClosing ? "Closing..." : "Close deployment"}
+                                </button>
+                                <span className="muted small">
+                                  Stops this active lease and returns remaining deployment escrow after settlement.
+                                  Requires AKT gas.
+                                </span>
+                              </div>
+                            ) : null}
                             {accessError ? <p className="error small">{accessError}</p> : null}
                             {accessDetails ? (
                               accessDetails.services.length > 0 ? (

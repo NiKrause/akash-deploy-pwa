@@ -14,8 +14,13 @@ import {
 } from "@akashnetwork/chain-sdk/web";
 import type { Manifest, SDLInput } from "@akashnetwork/chain-sdk/web";
 import type { AkashEndpoints } from "../config/networks";
+import { assertSdlPricingMatchesDeposit, collectPricingDenomsFromGroupSpecs } from "./deployValidation";
+import { parseLeaseAccessDetails, type LeaseAccessDetails } from "./leaseAccessParser";
+import { fetchFromProviderOrExplain, providerHttpBase } from "./providerHttp";
 import { createBrowserStargateClient } from "./stargateTxClient";
 import { getWalletExtension, type WalletKind } from "../wallet/keplr";
+
+export type { LeaseAccessDetails } from "./leaseAccessParser";
 
 type ChainNodeWebSDK = ReturnType<typeof createChainNodeWebSDK>;
 type CreateLeaseReq = Parameters<ChainNodeWebSDK["akash"]["market"]["v1beta5"]["createLease"]>[0];
@@ -72,42 +77,6 @@ export type CurrentLeasesOverview = {
   transferredEscrowAmount: string;
 };
 
-export type LeaseAccessIp = {
-  ip: string;
-  protocol: string;
-  port: number;
-  externalPort: number;
-};
-
-export type LeaseAccessPort = {
-  host: string;
-  name: string;
-  proto: string;
-  port: number;
-  externalPort: number;
-};
-
-export type LeaseAccessService = {
-  name: string;
-  available: number;
-  total: number;
-  uris: string[];
-  replicas: number;
-  readyReplicas: number;
-  availableReplicas: number;
-  ports: LeaseAccessPort[];
-  ips: LeaseAccessIp[];
-};
-
-export type LeaseAccessDetails = {
-  dseq: string;
-  provider: string;
-  providerHostUri: string;
-  statusUrl: string;
-  services: LeaseAccessService[];
-  raw: unknown;
-};
-
 /** Keplr/Leap “current account” — can differ from React state if the user switches accounts in the extension. */
 export async function getOfflineSignerPrimaryAddress(signer: OfflineSigner): Promise<string> {
   const accs = await signer.getAccounts();
@@ -160,6 +129,12 @@ export type DeployStep =
   | "done"
   | "error";
 
+export type TxBroadcastSummary = {
+  transactionHash: string;
+  gasUsed?: string;
+  gasWanted?: string;
+};
+
 function page(limit: number, offset = 0) {
   return {
     key: new Uint8Array(),
@@ -184,23 +159,22 @@ function readString(value: unknown): string | undefined {
   return undefined;
 }
 
+function readTxBroadcastSummary(value: unknown): TxBroadcastSummary | null {
+  if (!isRecord(value)) return null;
+  const transactionHash = readString(value.transactionHash)?.trim() || readString(value.hash)?.trim() || "";
+  if (!transactionHash) return null;
+  return {
+    transactionHash,
+    gasUsed: readString(value.gasUsed),
+    gasWanted: readString(value.gasWanted),
+  };
+}
+
 function readUint(value: unknown): number {
   const raw = readString(value);
   if (!raw) return 0;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : 0;
-}
-
-function readStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.map(readString).filter((entry): entry is string => !!entry?.trim()).map((entry) => entry.trim());
-}
-
-function readRecordValue(record: Record<string, unknown>, ...keys: string[]): unknown {
-  for (const key of keys) {
-    if (key in record) return record[key];
-  }
-  return undefined;
 }
 
 function decimalWholePart(value: string | undefined): string {
@@ -291,60 +265,6 @@ function parseDeploymentRecord(value: unknown): DeploymentRecord | undefined {
     },
     groups,
     escrow_account: escrowAccount,
-  };
-}
-
-function parseLeaseAccessIp(value: unknown): LeaseAccessIp | null {
-  if (!isRecord(value)) return null;
-  const ip = readString(readRecordValue(value, "ip"))?.trim();
-  if (!ip) return null;
-  return {
-    ip,
-    protocol: readString(readRecordValue(value, "protocol", "proto"))?.trim() ?? "",
-    port: readUint(readRecordValue(value, "port")),
-    externalPort: readUint(readRecordValue(value, "externalPort", "external_port")),
-  };
-}
-
-function parseLeaseAccessPort(value: unknown): LeaseAccessPort | null {
-  if (!isRecord(value)) return null;
-  const host = readString(readRecordValue(value, "host"))?.trim();
-  const name = readString(readRecordValue(value, "name"))?.trim() ?? "";
-  if (!host && !name) return null;
-  return {
-    host: host ?? "",
-    name,
-    proto: readString(readRecordValue(value, "proto", "protocol"))?.trim() ?? "",
-    port: readUint(readRecordValue(value, "port")),
-    externalPort: readUint(readRecordValue(value, "externalPort", "external_port")),
-  };
-}
-
-function parseLeaseAccessService(value: unknown): LeaseAccessService | null {
-  if (!isRecord(value)) return null;
-  const rawStatus = readRecordValue(value, "status");
-  const status = isRecord(rawStatus) ? rawStatus : undefined;
-  const name = readString(readRecordValue(value, "name"))?.trim();
-  const uris = status && isRecord(status) ? readStringArray(readRecordValue(status, "uris")) : [];
-  const rawPorts = readRecordValue(value, "ports");
-  const ports = Array.isArray(rawPorts)
-    ? rawPorts.map(parseLeaseAccessPort).filter((entry): entry is LeaseAccessPort => !!entry)
-    : [];
-  const rawIps = readRecordValue(value, "ips");
-  const ips = Array.isArray(rawIps)
-    ? rawIps.map(parseLeaseAccessIp).filter((entry): entry is LeaseAccessIp => !!entry)
-    : [];
-  if (!name && uris.length === 0 && ports.length === 0 && ips.length === 0) return null;
-  return {
-    name: name ?? "service",
-    available: status ? readUint(readRecordValue(status, "available")) : 0,
-    total: status ? readUint(readRecordValue(status, "total")) : 0,
-    uris,
-    replicas: status ? readUint(readRecordValue(status, "replicas")) : 0,
-    readyReplicas: status ? readUint(readRecordValue(status, "readyReplicas", "ready_replicas")) : 0,
-    availableReplicas: status ? readUint(readRecordValue(status, "availableReplicas", "available_replicas")) : 0,
-    ports,
-    ips,
   };
 }
 
@@ -680,49 +600,22 @@ export async function ensureClientCertificate(
   sdk: ChainNodeWebSDK,
   owner: string,
   onStep: (s: DeployStep) => void
-): Promise<void> {
+): Promise<TxBroadcastSummary | null> {
   onStep("checking_cert");
-  if (await hasValidCertificate(sdk, owner)) return;
+  if (await hasValidCertificate(sdk, owner)) return null;
   onStep("creating_cert");
   const pem = await certificateManager.generatePEM(owner);
   const enc = new TextEncoder();
-  await sdk.akash.cert.v1.createCertificate({
+  const tx = await sdk.akash.cert.v1.createCertificate({
     owner,
     cert: enc.encode(pem.cert),
     pubkey: enc.encode(pem.publicKey),
   });
+  return readTxBroadcastSummary(tx);
 }
 
 /** If deployment params cannot be read, use a safe default (typical min for `uact` / `uakt` on sandbox/mainnet). */
 const FALLBACK_MIN_DEPOSIT_MICRO = "500000";
-
-/** Every `ResourceUnit.price.denom` in the manifest must match the deployment deposit denom. */
-function collectPricingDenomsFromGroupSpecs(
-  groupSpecs: { resources?: { price?: { denom?: string | undefined } | undefined }[] | undefined }[]
-): string[] {
-  const found = new Set<string>();
-  for (const gs of groupSpecs) {
-    for (const ru of gs.resources ?? []) {
-      const d = ru.price?.denom?.trim();
-      if (d) found.add(d);
-    }
-  }
-  return [...found];
-}
-
-function assertSdlPricingMatchesDeposit(
-  groupSpecs: Parameters<typeof collectPricingDenomsFromGroupSpecs>[0],
-  depDenom: string
-): void {
-  const denoms = collectPricingDenomsFromGroupSpecs(groupSpecs);
-  if (!denoms.length) return;
-  const wrong = denoms.filter((d) => d !== depDenom);
-  if (!wrong.length) return;
-  const uniq = [...new Set(wrong)].join('", "');
-  throw new Error(
-    `SDL pricing uses bank denom(s) "${uniq}" but this app escrows deployment funds in "${depDenom}". They must be the same on-chain — set every profiles → placement → pricing → denom in your SDL to "${depDenom}", then deploy again.`
-  );
-}
 
 async function readMinDeploymentDepositMicro(sdk: ChainNodeWebSDK, depDenom: string): Promise<string> {
   try {
@@ -771,7 +664,7 @@ export async function createDeploymentTx(
   yamlText: string,
   endpoints: AkashEndpoints,
   onStep: (s: DeployStep) => void
-): Promise<{ dseq: string; groups: Manifest }> {
+): Promise<{ dseq: string; groups: Manifest; tx: TxBroadcastSummary | null }> {
   onStep("creating_deployment");
   const preview = parseAndPreviewSdl(yamlText);
   if (!preview.ok) {
@@ -793,7 +686,7 @@ export async function createDeploymentTx(
   assertSdlPricingMatchesDeposit(groupSpecs, depDenom);
 
   try {
-    await sdk.akash.deployment.v1beta4.createDeployment({
+    const tx = await sdk.akash.deployment.v1beta4.createDeployment({
       id: { owner, dseq },
       groups: groupSpecs,
       hash,
@@ -803,6 +696,7 @@ export async function createDeploymentTx(
       },
       reclamation: undefined,
     });
+    return { dseq: dseq.toString(), groups, tx: readTxBroadcastSummary(tx) };
   } catch (e) {
     const raw = e instanceof Error ? e.message : String(e);
     if (/deposit invalid/i.test(raw)) {
@@ -822,20 +716,20 @@ export async function createDeploymentTx(
     throw e;
   }
 
-  return { dseq: dseq.toString(), groups };
 }
 
 export async function closeDeploymentTx(
   sdk: ChainNodeWebSDK,
   owner: string,
   dseq: string
-): Promise<void> {
-  await sdk.akash.deployment.v1beta4.closeDeployment({
+): Promise<TxBroadcastSummary | null> {
+  const tx = await sdk.akash.deployment.v1beta4.closeDeployment({
     id: {
       owner,
       dseq: Long.fromString(dseq),
     },
   });
+  return readTxBroadcastSummary(tx);
 }
 
 export async function pollBids(
@@ -878,69 +772,12 @@ export async function createLeaseTx(
   sdk: ChainNodeWebSDK,
   bid: MarketBidRecord,
   onStep: (s: DeployStep) => void
-): Promise<MarketId> {
+): Promise<{ bidId: MarketId; tx: TxBroadcastSummary | null }> {
   onStep("creating_lease");
   const b = bid.bid;
   if (!b?.id) throw new Error("Invalid bid");
-  await sdk.akash.market.v1beta5.createLease({ bidId: b.id as BidIdArg });
-  return b.id;
-}
-
-export function providerHttpBase(hostUri: string): string {
-  const t = hostUri.trim();
-  if (t.startsWith("http://") || t.startsWith("https://")) return t.replace(/\/+$/, "");
-  return `https://${t.replace(/\/+$/, "")}`;
-}
-
-function isBrowserFetchNetworkError(error: unknown): boolean {
-  if (error instanceof TypeError) return true;
-  if (!(error instanceof Error)) return false;
-  const m = error.message;
-  return m === "Failed to fetch" || m === "Load failed" || /networkerror|network request failed/i.test(m);
-}
-
-/**
- * Browser `fetch` to a provider host often fails with a generic "Failed to fetch" when the
- * provider omits CORS headers, blocks cross-origin traffic, or when HTTPS pages call HTTP URLs.
- */
-async function fetchFromProviderOrExplain(
-  targetUrl: string,
-  init: RequestInit,
-  opts: { action: string; cliHint: string }
-): Promise<Response> {
-  const { action, cliHint } = opts;
-  let mixedContent = false;
-  try {
-    if (typeof globalThis.location !== "undefined") {
-      const page = globalThis.location.href;
-      if (page.startsWith("https:") && targetUrl.startsWith("http:")) mixedContent = true;
-    }
-  } catch {
-    /* ignore */
-  }
-
-  try {
-    return await fetch(targetUrl, init);
-  } catch (e) {
-    if (!isBrowserFetchNetworkError(e)) throw e;
-    let u: URL;
-    try {
-      u = new URL(targetUrl);
-    } catch {
-      throw new Error(
-        `Could not reach the provider (${targetUrl}) to ${action}. The browser blocked or could not complete the request (often CORS or mixed content). ${cliHint}`
-      );
-    }
-    const hostPart = u.port ? `${u.hostname}:${u.port}` : u.hostname;
-    if (mixedContent) {
-      throw new Error(
-        `Could not ${action} at ${hostPart}: this app is on HTTPS but the provider URL is HTTP, which browsers block (mixed content). Use a provider with HTTPS, run this app over HTTP during development, or use a desktop/CLI client. ${cliHint}`
-      );
-    }
-    throw new Error(
-      `Could not ${action} at ${hostPart} (${targetUrl}). The wallet step may have succeeded, but the browser could not reach the provider (typical causes: no CORS headers for this origin, host offline, or firewall/ad blocker). ${cliHint}`
-    );
-  }
+  const tx = await sdk.akash.market.v1beta5.createLease({ bidId: b.id as BidIdArg });
+  return { bidId: b.id, tx: readTxBroadcastSummary(tx) };
 }
 
 export async function sendManifest(
@@ -983,6 +820,7 @@ export async function sendManifest(
     {
       action: "upload the manifest",
       cliHint: "Use `akash provider send-manifest` (or equivalent) from a machine that can reach the provider API.",
+      providerProxyUrl: params.endpoints.providerProxyUrl,
     }
   );
   if (!res.ok) {
@@ -1043,6 +881,7 @@ async function fetchProviderLeaseStatusJson(
   const res = await fetchFromProviderOrExplain(statusUrl, { headers: { Authorization: `Bearer ${token}` } }, {
     action: "load lease status",
     cliHint: "Try `akash provider lease-status` or another tool that calls the provider outside the browser.",
+    providerProxyUrl: endpoints.providerProxyUrl,
   });
   if (!res.ok) {
     return { kind: "http_error", statusCode: res.status, raw: await res.text() };
@@ -1053,29 +892,6 @@ async function fetchProviderLeaseStatusJson(
     providerHostUri: hostUri,
     statusUrl,
     json: await res.json(),
-  };
-}
-
-function parseLeaseAccessDetails(
-  dseq: string,
-  provider: string,
-  providerHostUri: string,
-  statusUrl: string,
-  value: unknown
-): LeaseAccessDetails {
-  const servicesRaw = isRecord(value) && Array.isArray(readRecordValue(value, "services"))
-    ? readRecordValue(value, "services")
-    : [];
-  const services = Array.isArray(servicesRaw)
-    ? servicesRaw.map(parseLeaseAccessService).filter((entry): entry is LeaseAccessService => !!entry)
-    : [];
-  return {
-    dseq,
-    provider,
-    providerHostUri,
-    statusUrl,
-    services,
-    raw: value,
   };
 }
 

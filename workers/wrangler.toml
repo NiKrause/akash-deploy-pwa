@@ -1,0 +1,3 @@
+name = "akash-provider-proxy"
+main = "provider-proxy.js"
+compatibility_date = "2026-07-09"
