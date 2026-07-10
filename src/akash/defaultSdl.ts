@@ -32,10 +32,11 @@ export function alignSdlPricingDenomsToEscrow(yaml: string, escrowDenom: string)
 function renderUcanStoreSdl(mode: NetworkMode): string {
   const d = getEndpoints(mode).deploymentEscrowMinimalDenom;
   const sshPublicKey = env("VITE_UCAN_STORE_SSH_PUBLIC_KEY");
+  const sshPublicPort = env("VITE_UCAN_STORE_SSH_PUBLIC_PORT") || "2222";
   const sshExpose = sshPublicKey
     ? `
       - port: 22
-        as: 22
+        as: ${sshPublicPort}
         to:
           - global: true`
     : "";
