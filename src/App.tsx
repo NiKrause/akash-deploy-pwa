@@ -36,6 +36,7 @@ import {
   type TxBroadcastSummary,
 } from "./akash/deployService";
 import { deploymentHasActiveLease, deploymentIsOpenOrReclaimable } from "./akash/leaseOverview";
+import { collectSdlExposedPorts, formatSdlExposedPortLabel } from "./akash/sdlPorts";
 import { connectWallet, type WalletKind } from "./wallet/keplr";
 import { probeRestGateway, probeTendermintRpc } from "./lib/endpointConnectivity";
 import {
@@ -231,6 +232,7 @@ export default function App() {
   const [leaseInfo, setLeaseInfo] = useState<unknown>(null);
 
   const preview = useMemo(() => parseAndPreviewSdl(yamlText), [yamlText]);
+  const sdlExposedPorts = useMemo(() => collectSdlExposedPorts(yamlText), [yamlText]);
 
   const balanceUaktDisplay = useMemo(() => formatUaktStringToAkt(walletBalances.uakt), [walletBalances.uakt]);
   const balanceUsdApprox = useMemo(() => {
@@ -1111,60 +1113,91 @@ export default function App() {
                             {accessDetails ? (
                               accessDetails.services.length > 0 ? (
                                 <div className="lease-service-grid">
-                                  {accessDetails.services.map((service) => (
-                                    <div key={`${deployment.dseq}-${service.name}`} className="lease-service-card">
-                                      <div className="lease-service-title">
-                                        <strong>{service.name}</strong>
-                                        <span className="muted small">
-                                          Ready {service.readyReplicas || service.availableReplicas || service.available}/
-                                          {service.replicas || service.total || 0}
-                                        </span>
-                                      </div>
-                                      {service.uris.length > 0 ? (
-                                        <div className="lease-service-block">
-                                          <div className="muted small">URLs</div>
-                                          {service.uris.map((uri) =>
-                                            /^https?:\/\//i.test(uri) ? (
-                                              <a
-                                                key={uri}
-                                                href={uri}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="lease-link"
+                                  {accessDetails.services.map((service) => {
+                                    const expectedPorts = sdlExposedPorts.filter(
+                                      (port) => port.serviceName === service.name
+                                    );
+                                    const hasExpectedNonHttpPort = expectedPorts.some(
+                                      (port) => port.publicPort !== 80 && port.containerPort !== 8080
+                                    );
+
+                                    return (
+                                      <div key={`${deployment.dseq}-${service.name}`} className="lease-service-card">
+                                        <div className="lease-service-title">
+                                          <strong>{service.name}</strong>
+                                          <span className="muted small">
+                                            Ready {service.readyReplicas || service.availableReplicas || service.available}/
+                                            {service.replicas || service.total || 0}
+                                          </span>
+                                        </div>
+                                        {service.uris.length > 0 ? (
+                                          <div className="lease-service-block">
+                                            <div className="muted small">URLs</div>
+                                            {service.uris.map((uri) =>
+                                              /^https?:\/\//i.test(uri) ? (
+                                                <a
+                                                  key={uri}
+                                                  href={uri}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="lease-link"
+                                                >
+                                                  {uri}
+                                                </a>
+                                              ) : (
+                                                <code key={uri}>{uri}</code>
+                                              )
+                                            )}
+                                          </div>
+                                        ) : null}
+                                        {service.ports.length > 0 ? (
+                                          <div className="lease-service-block">
+                                            <div className="muted small">Forwarded ports</div>
+                                            {service.ports.map((port) => (
+                                              <code key={`${service.name}-${port.host}-${port.externalPort}-${port.port}`}>
+                                                {port.host || "host"}:{port.externalPort} {"->"} {port.port}/
+                                                {port.proto || "tcp"}
+                                                {port.name ? ` (${port.name})` : ""}
+                                              </code>
+                                            ))}
+                                          </div>
+                                        ) : null}
+                                        {expectedPorts.length > 0 ? (
+                                          <div className="lease-service-block">
+                                            <div className="muted small">Expected ports from SDL</div>
+                                            {expectedPorts.map((port) => (
+                                              <code
+                                                key={`${service.name}-expected-${port.publicPort}-${port.containerPort}-${port.proto}`}
                                               >
-                                                {uri}
-                                              </a>
-                                            ) : (
-                                              <code key={uri}>{uri}</code>
-                                            )
-                                          )}
-                                        </div>
-                                      ) : null}
-                                      {service.ports.length > 0 ? (
-                                        <div className="lease-service-block">
-                                          <div className="muted small">Forwarded ports</div>
-                                          {service.ports.map((port) => (
-                                            <code key={`${service.name}-${port.host}-${port.externalPort}-${port.port}`}>
-                                              {port.host || "host"}:{port.externalPort} {"->"} {port.port}/{port.proto || "tcp"}
-                                              {port.name ? ` (${port.name})` : ""}
-                                            </code>
-                                          ))}
-                                        </div>
-                                      ) : null}
-                                      {service.ips.length > 0 ? (
-                                        <div className="lease-service-block">
-                                          <div className="muted small">IP addresses</div>
-                                          {service.ips.map((ip) => (
-                                            <code key={`${service.name}-${ip.ip}-${ip.externalPort}-${ip.port}`}>
-                                              {ip.ip}:{ip.externalPort || ip.port}
-                                              {ip.port && ip.externalPort && ip.externalPort !== ip.port ? ` -> ${ip.port}` : ""}
-                                              /{ip.protocol || "tcp"}
-                                            </code>
-                                          ))}
-                                        </div>
-                                      ) : null}
-                                    </div>
-                                  ))}
+                                                {formatSdlExposedPortLabel(port)}: provider/as {port.publicPort} {"->"}{" "}
+                                                container {port.containerPort}/{port.proto}
+                                                {port.global ? " · global" : ""}
+                                              </code>
+                                            ))}
+                                            {service.ports.length === 0 && hasExpectedNonHttpPort ? (
+                                              <span className="muted small">
+                                                Provider status has not reported forwarded non-HTTP ports yet.
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                        ) : null}
+                                        {service.ips.length > 0 ? (
+                                          <div className="lease-service-block">
+                                            <div className="muted small">IP addresses</div>
+                                            {service.ips.map((ip) => (
+                                              <code key={`${service.name}-${ip.ip}-${ip.externalPort}-${ip.port}`}>
+                                                {ip.ip}:{ip.externalPort || ip.port}
+                                                {ip.port && ip.externalPort && ip.externalPort !== ip.port
+                                                  ? ` -> ${ip.port}`
+                                                  : ""}
+                                                /{ip.protocol || "tcp"}
+                                              </code>
+                                            ))}
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               ) : (
                                 <p className="muted small lease-empty">
