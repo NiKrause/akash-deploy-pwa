@@ -22,6 +22,11 @@ test("UCAN Store SSH exposure is opt-in", () => {
   assert.doesNotMatch(sdl, /port: 22/);
 });
 
+test("UCAN Store template reserves enough memory for Kubo and the app", () => {
+  const sdl = getDefaultSdl("mainnet");
+  assert.match(sdl, /memory:\n\s+size: 2Gi/);
+});
+
 test("all SDL templates align pricing denom to the selected network escrow denom", () => {
   const escrowDenom = getEndpoints("mainnet").deploymentEscrowMinimalDenom;
   for (const template of SDL_TEMPLATES) {
