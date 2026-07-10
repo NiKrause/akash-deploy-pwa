@@ -40,6 +40,7 @@ function renderUcanStoreSdl(mode: NetworkMode): string {
     ? `
       - port: 22
         as: ${sshPublicPort}
+        proto: tcp
         to:
           - global: true`
     : "";
