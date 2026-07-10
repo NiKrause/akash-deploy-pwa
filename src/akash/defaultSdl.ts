@@ -2,6 +2,9 @@ import { getEndpoints, type NetworkMode } from "../config/networks.ts";
 
 export type SdlTemplateId = "ucan-store" | "nginx-smoke";
 
+export const UCAN_STORE_AKASH_IMAGE =
+  "ghcr.io/nomadkids/ucan-store-akash@sha256:48c3e696ddd1a1bf9d66a091b4e0f1287c64b2c5c42ab028244879f1436622f0";
+
 type SdlTemplate = {
   id: SdlTemplateId;
   name: string;
@@ -49,7 +52,7 @@ function renderUcanStoreSdl(mode: NetworkMode): string {
 
 services:
   ucan-store:
-    image: ghcr.io/nomadkids/ucan-store-akash:latest
+    image: ${UCAN_STORE_AKASH_IMAGE}
     expose:
       - port: 8080
         as: 80
