@@ -36,6 +36,7 @@ import {
   type TxBroadcastSummary,
 } from "./akash/deployService";
 import { deploymentHasActiveLease, deploymentIsOpenOrReclaimable } from "./akash/leaseOverview";
+import { collectLeaseSshCommands, isSdlSshPort } from "./akash/leaseSsh";
 import { collectSdlExposedPorts, formatSdlExposedPortLabel } from "./akash/sdlPorts";
 import { connectWallet, type WalletKind } from "./wallet/keplr";
 import { probeRestGateway, probeTendermintRpc } from "./lib/endpointConnectivity";
@@ -1117,6 +1118,8 @@ export default function App() {
                                     const expectedPorts = sdlExposedPorts.filter(
                                       (port) => port.serviceName === service.name
                                     );
+                                    const expectedSshPorts = expectedPorts.filter(isSdlSshPort);
+                                    const sshCommands = collectLeaseSshCommands(service, expectedPorts);
                                     const hasExpectedNonHttpPort = expectedPorts.some(
                                       (port) => port.publicPort !== 80 && port.containerPort !== 8080
                                     );
@@ -1162,6 +1165,16 @@ export default function App() {
                                             ))}
                                           </div>
                                         ) : null}
+                                        {sshCommands.length > 0 ? (
+                                          <div className="lease-service-block">
+                                            <div className="muted small">SSH</div>
+                                            {sshCommands.map((ssh) => (
+                                              <code key={`${service.name}-ssh-${ssh.host}-${ssh.port}`}>
+                                                {ssh.command}
+                                              </code>
+                                            ))}
+                                          </div>
+                                        ) : null}
                                         {expectedPorts.length > 0 ? (
                                           <div className="lease-service-block">
                                             <div className="muted small">Expected ports from SDL</div>
@@ -1174,7 +1187,12 @@ export default function App() {
                                                 {port.global ? " · global" : ""}
                                               </code>
                                             ))}
-                                            {service.ports.length === 0 && hasExpectedNonHttpPort ? (
+                                            {expectedSshPorts.length > 0 && sshCommands.length === 0 ? (
+                                              <span className="muted small">
+                                                SSH was requested in the SDL, but this provider status has not reported
+                                                a forwarded SSH endpoint.
+                                              </span>
+                                            ) : service.ports.length === 0 && hasExpectedNonHttpPort ? (
                                               <span className="muted small">
                                                 Provider status has not reported forwarded non-HTTP ports yet.
                                               </span>
