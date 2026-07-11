@@ -343,6 +343,22 @@ button.lease-view-tab-active {
   margin-top: 0.65rem;
 }
 
+.domain-setup-block code {
+  color: #bae6fd;
+}
+
+.domain-setup-actions {
+  margin-top: 0;
+}
+
+.domain-status-ok {
+  color: #86efac;
+}
+
+.domain-status-fail {
+  color: #fca5a5;
+}
+
 .lease-access {
   border-top: 1px solid #22304a;
   margin-top: 0.85rem;

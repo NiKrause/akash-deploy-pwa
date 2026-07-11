@@ -33,6 +33,7 @@ test("UCAN Store declares UI parameters for flexible SDL generation", () => {
   const template = SDL_TEMPLATES.find((candidate) => candidate.id === "ucan-store");
   assert.equal(template?.parameters?.[0]?.id, "ucanStorePublicOrigin");
   assert.equal(template?.parameters?.[0]?.inputType, "url");
+  assert.equal(template?.parameters?.[0]?.role, "publicOrigin");
 });
 
 test("UCAN Store template can set a custom public origin and accepted host", () => {

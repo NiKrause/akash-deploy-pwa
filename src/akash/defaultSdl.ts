@@ -9,6 +9,7 @@ export type SdlTemplateParameter = {
   id: string;
   label: string;
   inputType: "text" | "url" | "textarea";
+  role?: "publicOrigin";
   placeholder?: string;
   defaultValue?: string;
   help: string;
@@ -186,6 +187,7 @@ export const SDL_TEMPLATES: SdlTemplate[] = [
         id: "ucanStorePublicOrigin",
         label: "Custom domain",
         inputType: "url",
+        role: "publicOrigin",
         placeholder: "https://ucan.example.com",
         help: "Optional. Enter the final HTTPS origin before deploying. After the lease is ready, access details tell you which provider ingress target your DNS should point to.",
         valueHelp: (value) => {

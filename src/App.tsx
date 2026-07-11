@@ -13,6 +13,7 @@ import {
   alignSdlPricingDenomsToEscrow,
   getSdlTemplate,
   isSdlTemplateId,
+  normalizeUcanStorePublicOrigin,
   type SdlTemplateId,
   type SdlTemplateParameter,
 } from "./akash/defaultSdl";
@@ -80,6 +81,11 @@ type LeaseView = "open" | "closed";
 type DeploymentTxLink = TxBroadcastSummary & { label: string };
 type SelectedSdlTemplate = SdlTemplateId | "custom";
 type SdlTemplateValues = Record<string, string>;
+type DomainVerification = {
+  origin: string;
+  status: "checking" | "ok" | "fail";
+  message: string;
+};
 
 function shortenAddress(value: string): string {
   return value.length > 16 ? `${value.slice(0, 10)}...${value.slice(-8)}` : value;
@@ -181,6 +187,18 @@ function blockTxsRestUrl(restBase: string, height: string): string | null {
   return url.toString();
 }
 
+function originHealthUrl(origin: string): string {
+  return new URL("/health", origin).toString();
+}
+
+function originHostname(origin: string): string {
+  try {
+    return new URL(origin).hostname;
+  } catch {
+    return "";
+  }
+}
+
 export default function App() {
   const persistedNetRef = useRef<ReturnType<typeof readPersistedNetworkFields> | null>(null);
   if (persistedNetRef.current === null) {
@@ -240,6 +258,7 @@ export default function App() {
   const [loadingLeaseAccessDseq, setLoadingLeaseAccessDseq] = useState<string | null>(null);
   const [leaseAccessByDseq, setLeaseAccessByDseq] = useState<Record<string, LeaseAccessDetails>>({});
   const [leaseAccessErrorByDseq, setLeaseAccessErrorByDseq] = useState<Record<string, string>>({});
+  const [domainVerificationByDseq, setDomainVerificationByDseq] = useState<Record<string, DomainVerification>>({});
   /** Mainnet AKT spot in USD (CoinGecko), applied to the `uakt` balance line. */
   const [aktUsdPrice, setAktUsdPrice] = useState<number | null>(null);
   const [step, setStep] = useState<DeployStep>("idle");
@@ -662,6 +681,50 @@ export default function App() {
     selectedSdlTemplate === "custom"
       ? null
       : SDL_TEMPLATES.find((template) => template.id === selectedSdlTemplate) ?? null;
+  const publicOriginParameter = activeSdlTemplate?.parameters?.find((parameter) => parameter.role === "publicOrigin");
+  const configuredPublicOrigin = publicOriginParameter
+    ? normalizeUcanStorePublicOrigin(sdlTemplateValues[publicOriginParameter.id] ?? "")
+    : "";
+
+  const verifyPublicOrigin = useCallback(async (dseqToVerify: string, origin: string) => {
+    const healthUrl = originHealthUrl(origin);
+    setDomainVerificationByDseq((prev) => ({
+      ...prev,
+      [dseqToVerify]: {
+        origin,
+        status: "checking",
+        message: `Checking ${healthUrl}...`,
+      },
+    }));
+
+    try {
+      const response = await fetch(healthUrl, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      setDomainVerificationByDseq((prev) => ({
+        ...prev,
+        [dseqToVerify]: {
+          origin,
+          status: "ok",
+          message: `Confirmed: this browser reached ${healthUrl}.`,
+        },
+      }));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setDomainVerificationByDseq((prev) => ({
+        ...prev,
+        [dseqToVerify]: {
+          origin,
+          status: "fail",
+          message: `Could not reach ${healthUrl}: ${msg}`,
+        },
+      }));
+    }
+  }, []);
 
   return (
     <div className="app">
@@ -1153,6 +1216,10 @@ export default function App() {
                                     const hasExpectedNonHttpPort = expectedPorts.some(
                                       (port) => port.publicPort !== 80 && port.containerPort !== 8080
                                     );
+                                    const publicOriginHost = originHostname(configuredPublicOrigin);
+                                    const dnsTarget = service.uris[0] ?? "";
+                                    const domainVerification = domainVerificationByDseq[deployment.dseq];
+                                    const showDomainSetup = !!configuredPublicOrigin && !!publicOriginHost && !!dnsTarget;
 
                                     return (
                                       <div key={`${deployment.dseq}-${service.name}`} className="lease-service-card">
@@ -1181,6 +1248,37 @@ export default function App() {
                                                 <code key={uri}>{uri}</code>
                                               )
                                             )}
+                                          </div>
+                                        ) : null}
+                                        {showDomainSetup ? (
+                                          <div className="lease-service-block domain-setup-block">
+                                            <div className="muted small">Custom domain setup</div>
+                                            <code>
+                                              {publicOriginHost} CNAME {dnsTarget}
+                                            </code>
+                                            <div className="lease-actions domain-setup-actions">
+                                              <button
+                                                type="button"
+                                                className="secondary tiny"
+                                                onClick={() => void verifyPublicOrigin(deployment.dseq, configuredPublicOrigin)}
+                                                disabled={domainVerification?.status === "checking"}
+                                              >
+                                                {domainVerification?.status === "checking" ? "Checking..." : "Verify DNS"}
+                                              </button>
+                                              <span
+                                                className={`mini ${
+                                                  domainVerification?.status === "ok"
+                                                    ? "domain-status-ok"
+                                                    : domainVerification?.status === "fail"
+                                                      ? "domain-status-fail"
+                                                      : "muted"
+                                                }`}
+                                              >
+                                                {domainVerification?.origin === configuredPublicOrigin
+                                                  ? domainVerification.message
+                                                  : "After DNS points here, verify from this browser before using the custom origin."}
+                                              </span>
+                                            </div>
                                           </div>
                                         ) : null}
                                         {service.ports.length > 0 ? (
