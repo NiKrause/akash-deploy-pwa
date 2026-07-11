@@ -3,12 +3,12 @@ import { getEndpoints, type NetworkMode } from "../config/networks.ts";
 export type SdlTemplateId = "ucan-store" | "nginx-smoke";
 
 export const UCAN_STORE_AKASH_IMAGE =
-  "ghcr.io/nomadkids/ucan-store-akash@sha256:877ff344d5cab0632c92462cc4282102826c22a8ed8b517d9b9f98df339a3390";
+  "ghcr.io/nomadkids/ucan-store-akash@sha256:78e4b73722eb35d134af30632f84e14e347d5b0cb837921774701fbabb16a7b9";
 
 export type SdlTemplateParameter = {
   id: string;
   label: string;
-  inputType: "text" | "url" | "textarea";
+  inputType: "checkbox" | "text" | "url" | "textarea";
   role?: "publicOrigin" | "configureToken";
   placeholder?: string;
   defaultValue?: string;
@@ -77,6 +77,8 @@ function renderUcanStoreSdl(mode: NetworkMode, options: SdlTemplateOptions = {})
   const publicOrigin = normalizeUcanStorePublicOrigin(options.ucanStorePublicOrigin ?? "");
   const publicOriginHost = ucanStorePublicOriginHost(publicOrigin);
   const configureToken = options.ucanStoreConfigureToken?.trim() ?? "";
+  const selfManagedTls = !!publicOriginHost && options.ucanStoreSelfManagedTls !== "false";
+  const httpContainerPort = selfManagedTls ? 80 : 8080;
   const acceptHosts = publicOriginHost
     ? `
         accept:
@@ -90,9 +92,21 @@ function renderUcanStoreSdl(mode: NetworkMode, options: SdlTemplateOptions = {})
         to:
           - global: true`
     : "";
+  const selfManagedTlsExpose = selfManagedTls
+    ? `
+      - port: 443
+        as: 443
+        proto: tcp
+        to:
+          - global: true`
+    : "";
   const sshEnv = sshPublicKey
     ? `
       - ${yamlSingleQuoted(`UCAN_STORE_SSH_AUTHORIZED_KEYS=${sshPublicKey}`)}`
+    : "";
+  const selfManagedTlsEnv = selfManagedTls
+    ? `
+      - ${yamlSingleQuoted(`UCAN_STORE_TLS_DOMAIN=${publicOriginHost}`)}`
     : "";
   const publicOriginEnv = publicOrigin && !configureToken
     ? yamlSingleQuoted(`UCAN_STORE_PUBLIC_ORIGIN=${publicOrigin}`)
@@ -108,14 +122,14 @@ services:
   ucan-store:
     image: ${UCAN_STORE_AKASH_IMAGE}
     expose:
-      - port: 8080
+      - port: ${httpContainerPort}
         as: 80${acceptHosts}
         to:
-          - global: true${sshExpose}
+          - global: true${selfManagedTlsExpose}${sshExpose}
     env:
       - ${publicOriginEnv}
       - UCAN_STORE_DATA_DIR=/data/ucan-store
-      - IPFS_PATH=/data/ipfs${sshEnv}${configureEnv}
+      - IPFS_PATH=/data/ipfs${selfManagedTlsEnv}${sshEnv}${configureEnv}
 
 profiles:
   compute:
@@ -209,6 +223,13 @@ export const SDL_TEMPLATES: SdlTemplate[] = [
         inputType: "text",
         role: "configureToken",
         help: "Generated per browser session. The deployed service requires this bearer token before it accepts runtime origin changes.",
+      },
+      {
+        id: "ucanStoreSelfManagedTls",
+        label: "Self-managed TLS",
+        inputType: "checkbox",
+        defaultValue: "true",
+        help: "Requests direct 80/443 exposure and asks Caddy to issue the custom-domain certificate. This only works when the selected provider really forwards those public ports to the container.",
       },
     ],
     render: renderUcanStoreSdl,

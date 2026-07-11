@@ -605,6 +605,14 @@ button.deploy {
   min-height: 2.1rem;
 }
 
+.sdl-template-checkbox {
+  align-self: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0;
+  accent-color: #38bdf8;
+}
+
 .sdl-domain-hint {
   grid-column: 2;
   margin: 0;

@@ -1610,12 +1610,21 @@ export default function App() {
               const value = sdlTemplateValues[parameter.id] ?? parameter.defaultValue ?? "";
               const help = parameter.valueHelp?.(value) || parameter.help;
               const inputId = `sdl-template-parameter-${activeSdlTemplate.id}-${parameter.id}`;
+              const checkboxChecked = value ? value === "true" : parameter.defaultValue === "true";
               return (
                 <Fragment key={parameter.id}>
                   <label className="sdl-template-label" htmlFor={inputId}>
                     {parameter.label}
                   </label>
-                  {parameter.inputType === "textarea" ? (
+                  {parameter.inputType === "checkbox" ? (
+                    <input
+                      id={inputId}
+                      className="sdl-template-checkbox"
+                      type="checkbox"
+                      checked={checkboxChecked}
+                      onChange={(e) => updateSdlTemplateParameter(parameter.id, e.target.checked ? "true" : "false")}
+                    />
+                  ) : parameter.inputType === "textarea" ? (
                     <textarea
                       id={inputId}
                       className="endpoint-input sdl-domain-input"
