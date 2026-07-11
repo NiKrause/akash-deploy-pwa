@@ -29,6 +29,12 @@ test("UCAN Store template reserves enough memory for Kubo and the app", () => {
   assert.match(sdl, /memory:\n\s+size: 2Gi/);
 });
 
+test("UCAN Store declares UI parameters for flexible SDL generation", () => {
+  const template = SDL_TEMPLATES.find((candidate) => candidate.id === "ucan-store");
+  assert.equal(template?.parameters?.[0]?.id, "ucanStorePublicOrigin");
+  assert.equal(template?.parameters?.[0]?.inputType, "url");
+});
+
 test("UCAN Store template can set a custom public origin and accepted host", () => {
   const sdl = getSdlTemplate("mainnet", "ucan-store", {
     ucanStorePublicOrigin: "ucan.example.com/some/path",

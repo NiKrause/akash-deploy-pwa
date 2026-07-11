@@ -13,9 +13,8 @@ import {
   alignSdlPricingDenomsToEscrow,
   getSdlTemplate,
   isSdlTemplateId,
-  normalizeUcanStorePublicOrigin,
   type SdlTemplateId,
-  ucanStorePublicOriginHost,
+  type SdlTemplateParameter,
 } from "./akash/defaultSdl";
 import {
   closeDeploymentTx,
@@ -69,6 +68,7 @@ type Persisted = {
   network: NetworkMode;
   yaml: string;
   sdlTemplate?: SdlTemplateId | "custom";
+  sdlTemplateValues?: Record<string, string>;
   ucanStorePublicOrigin?: string;
   dseq?: string;
   rest?: string;
@@ -79,6 +79,7 @@ type LedState = "idle" | "ok" | "fail";
 type LeaseView = "open" | "closed";
 type DeploymentTxLink = TxBroadcastSummary & { label: string };
 type SelectedSdlTemplate = SdlTemplateId | "custom";
+type SdlTemplateValues = Record<string, string>;
 
 function shortenAddress(value: string): string {
   return value.length > 16 ? `${value.slice(0, 10)}...${value.slice(-8)}` : value;
@@ -113,6 +114,14 @@ function readPersistedNetworkFields(): { network: NetworkMode; rest: string; rpc
   const rawRest = p?.rest ?? d.rest;
   const rawRpc = p?.rpc ?? d.rpc;
   return { network: net, ...sanitizePersistedRpcRest(net, rawRpc, rawRest) };
+}
+
+function persistedTemplateValues(persisted: Persisted | null): SdlTemplateValues {
+  if (persisted?.sdlTemplateValues) return persisted.sdlTemplateValues;
+  if (persisted?.ucanStorePublicOrigin) {
+    return { ucanStorePublicOrigin: persisted.ucanStorePublicOrigin };
+  }
+  return {};
 }
 
 function loadPersisted(): Persisted | null {
@@ -192,8 +201,8 @@ export default function App() {
   }, []);
   const [selectedSdlTemplate, setSelectedSdlTemplate] =
     useState<SelectedSdlTemplate>(initialSelectedSdlTemplate);
-  const [ucanStorePublicOrigin, setUcanStorePublicOrigin] = useState(
-    () => loadPersisted()?.ucanStorePublicOrigin ?? ""
+  const [sdlTemplateValues, setSdlTemplateValues] = useState<SdlTemplateValues>(() =>
+    persistedTemplateValues(loadPersisted())
   );
 
   const endpoints = useMemo(() => {
@@ -212,7 +221,7 @@ export default function App() {
       getSdlTemplate(
         net,
         initialSelectedSdlTemplate === "custom" ? DEFAULT_SDL_TEMPLATE_ID : initialSelectedSdlTemplate,
-        { ucanStorePublicOrigin: loadPersisted()?.ucanStorePublicOrigin ?? "" }
+        persistedTemplateValues(loadPersisted())
       );
     const esc = getEndpoints(net).deploymentEscrowMinimalDenom;
     return alignSdlPricingDenomsToEscrow(raw, esc);
@@ -330,12 +339,12 @@ export default function App() {
       network,
       yaml: yamlText,
       sdlTemplate: selectedSdlTemplate,
-      ucanStorePublicOrigin,
+      sdlTemplateValues,
       dseq: dseq ?? undefined,
       rest: restInput,
       rpc: rpcInput,
     });
-  }, [network, yamlText, selectedSdlTemplate, ucanStorePublicOrigin, dseq, restInput, rpcInput]);
+  }, [network, yamlText, selectedSdlTemplate, sdlTemplateValues, dseq, restInput, rpcInput]);
 
   const runEndpointTests = useCallback(async () => {
     setProbing(true);
@@ -599,9 +608,9 @@ export default function App() {
   const selectSdlTemplate = useCallback(
     (templateId: SdlTemplateId) => {
       setSelectedSdlTemplate(templateId);
-      setYamlText(getSdlTemplate(network, templateId, { ucanStorePublicOrigin }));
+      setYamlText(getSdlTemplate(network, templateId, sdlTemplateValues));
     },
-    [network, ucanStorePublicOrigin]
+    [network, sdlTemplateValues]
   );
 
   const editYamlText = useCallback((nextYaml: string) => {
@@ -609,12 +618,15 @@ export default function App() {
     setYamlText(nextYaml);
   }, []);
 
-  const updateUcanStorePublicOrigin = useCallback(
-    (nextOrigin: string) => {
-      setUcanStorePublicOrigin(nextOrigin);
-      if (selectedSdlTemplate === "ucan-store") {
-        setYamlText(getSdlTemplate(network, "ucan-store", { ucanStorePublicOrigin: nextOrigin }));
-      }
+  const updateSdlTemplateParameter = useCallback(
+    (parameterId: string, nextValue: string) => {
+      setSdlTemplateValues((prev) => {
+        const next = { ...prev, [parameterId]: nextValue };
+        if (isSdlTemplateId(selectedSdlTemplate)) {
+          setYamlText(getSdlTemplate(network, selectedSdlTemplate, next));
+        }
+        return next;
+      });
     },
     [network, selectedSdlTemplate]
   );
@@ -636,9 +648,9 @@ export default function App() {
       setCurrentLeases(null);
       setCurrentLeasesError(null);
       setSelectedSdlTemplate(nextTemplate);
-      setYamlText(getSdlTemplate(nextNetwork, nextTemplate, { ucanStorePublicOrigin }));
+      setYamlText(getSdlTemplate(nextNetwork, nextTemplate, sdlTemplateValues));
     },
-    [selectedSdlTemplate, ucanStorePublicOrigin]
+    [selectedSdlTemplate, sdlTemplateValues]
   );
 
   const hasLeaseSection = address !== null && currentLeases !== null;
@@ -650,8 +662,6 @@ export default function App() {
     selectedSdlTemplate === "custom"
       ? null
       : SDL_TEMPLATES.find((template) => template.id === selectedSdlTemplate) ?? null;
-  const normalizedUcanStorePublicOrigin = normalizeUcanStorePublicOrigin(ucanStorePublicOrigin);
-  const normalizedUcanStorePublicOriginHost = ucanStorePublicOriginHost(ucanStorePublicOrigin);
 
   return (
     <div className="app">
@@ -1355,36 +1365,43 @@ export default function App() {
             {activeSdlTemplate?.description ?? "Edited SDL. Pick a template to replace the editor content."}
           </span>
         </div>
-        {selectedSdlTemplate === "ucan-store" ? (
+        {activeSdlTemplate?.parameters?.length ? (
           <div className="sdl-template-options">
-            <label className="sdl-template-label" htmlFor="ucan-store-public-origin">
-              Custom domain
-            </label>
-            <input
-              id="ucan-store-public-origin"
-              className="endpoint-input sdl-domain-input"
-              type="text"
-              value={ucanStorePublicOrigin}
-              onChange={(e) => updateUcanStorePublicOrigin(e.target.value)}
-              placeholder="https://ucan.example.com"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <p className="muted mini sdl-domain-hint">
-              {normalizedUcanStorePublicOrigin ? (
-                <>
-                  Sets <code>UCAN_STORE_PUBLIC_ORIGIN={normalizedUcanStorePublicOrigin}</code> and accepts host{" "}
-                  <code>{normalizedUcanStorePublicOriginHost}</code>. After deployment, load access details and point DNS
-                  for that host to the provider ingress hostname, or use the provider A/AAAA records if your zone cannot
-                  CNAME there. Wait for DNS/TLS before treating this as the public origin.
-                </>
-              ) : (
-                <>
-                  Optional. Enter the final HTTPS origin before deploying. After the lease is ready, the access details
-                  tell you which provider ingress target your DNS should point to.
-                </>
-              )}
-            </p>
+            {activeSdlTemplate.parameters.map((parameter: SdlTemplateParameter) => {
+              const value = sdlTemplateValues[parameter.id] ?? parameter.defaultValue ?? "";
+              const help = parameter.valueHelp?.(value) || parameter.help;
+              const inputId = `sdl-template-parameter-${activeSdlTemplate.id}-${parameter.id}`;
+              return (
+                <Fragment key={parameter.id}>
+                  <label className="sdl-template-label" htmlFor={inputId}>
+                    {parameter.label}
+                  </label>
+                  {parameter.inputType === "textarea" ? (
+                    <textarea
+                      id={inputId}
+                      className="endpoint-input sdl-domain-input"
+                      value={value}
+                      onChange={(e) => updateSdlTemplateParameter(parameter.id, e.target.value)}
+                      placeholder={parameter.placeholder}
+                      rows={3}
+                      spellCheck={false}
+                    />
+                  ) : (
+                    <input
+                      id={inputId}
+                      className="endpoint-input sdl-domain-input"
+                      type={parameter.inputType}
+                      value={value}
+                      onChange={(e) => updateSdlTemplateParameter(parameter.id, e.target.value)}
+                      placeholder={parameter.placeholder}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  )}
+                  <p className="muted mini sdl-domain-hint">{help}</p>
+                </Fragment>
+              );
+            })}
           </div>
         ) : null}
         <p className="muted small sdl-escrow-hint">

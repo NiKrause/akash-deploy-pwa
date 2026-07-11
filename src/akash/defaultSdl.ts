@@ -5,16 +5,25 @@ export type SdlTemplateId = "ucan-store" | "nginx-smoke";
 export const UCAN_STORE_AKASH_IMAGE =
   "ghcr.io/nomadkids/ucan-store-akash@sha256:48c3e696ddd1a1bf9d66a091b4e0f1287c64b2c5c42ab028244879f1436622f0";
 
+export type SdlTemplateParameter = {
+  id: string;
+  label: string;
+  inputType: "text" | "url" | "textarea";
+  placeholder?: string;
+  defaultValue?: string;
+  help: string;
+  valueHelp?: (value: string) => string;
+};
+
 type SdlTemplate = {
   id: SdlTemplateId;
   name: string;
   description: string;
+  parameters?: SdlTemplateParameter[];
   render: (mode: NetworkMode, options?: SdlTemplateOptions) => string;
 };
 
-export type SdlTemplateOptions = {
-  ucanStorePublicOrigin?: string;
-};
+export type SdlTemplateOptions = Record<string, string | undefined>;
 
 function env(name: string): string {
   const v = import.meta.env?.[name];
@@ -172,6 +181,22 @@ export const SDL_TEMPLATES: SdlTemplate[] = [
     id: "ucan-store",
     name: "UCAN Store",
     description: "Real UCAN Store workload from the akash branch: web UI, upload API, IPFS/Kubo, and Caddy.",
+    parameters: [
+      {
+        id: "ucanStorePublicOrigin",
+        label: "Custom domain",
+        inputType: "url",
+        placeholder: "https://ucan.example.com",
+        help: "Optional. Enter the final HTTPS origin before deploying. After the lease is ready, access details tell you which provider ingress target your DNS should point to.",
+        valueHelp: (value) => {
+          const origin = normalizeUcanStorePublicOrigin(value);
+          const host = ucanStorePublicOriginHost(origin);
+          return origin
+            ? `Sets UCAN_STORE_PUBLIC_ORIGIN=${origin} and accepts host ${host}. After deployment, load access details and point DNS for that host to the provider ingress hostname, or use the provider A/AAAA records if your zone cannot CNAME there. Wait for DNS/TLS before treating this as the public origin.`
+            : "";
+        },
+      },
+    ],
     render: renderUcanStoreSdl,
   },
   {
