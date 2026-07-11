@@ -9,7 +9,7 @@ export type SdlTemplateParameter = {
   id: string;
   label: string;
   inputType: "text" | "url" | "textarea";
-  role?: "publicOrigin";
+  role?: "publicOrigin" | "configureToken";
   placeholder?: string;
   defaultValue?: string;
   help: string;
@@ -76,6 +76,7 @@ function renderUcanStoreSdl(mode: NetworkMode, options: SdlTemplateOptions = {})
   const sshPublicPort = env("VITE_UCAN_STORE_SSH_PUBLIC_PORT") || "2222";
   const publicOrigin = normalizeUcanStorePublicOrigin(options.ucanStorePublicOrigin ?? "");
   const publicOriginHost = ucanStorePublicOriginHost(publicOrigin);
+  const configureToken = options.ucanStoreConfigureToken?.trim() ?? "";
   const acceptHosts = publicOriginHost
     ? `
         accept:
@@ -93,9 +94,13 @@ function renderUcanStoreSdl(mode: NetworkMode, options: SdlTemplateOptions = {})
     ? `
       - ${yamlSingleQuoted(`UCAN_STORE_SSH_AUTHORIZED_KEYS=${sshPublicKey}`)}`
     : "";
-  const publicOriginEnv = publicOrigin
+  const publicOriginEnv = publicOrigin && !configureToken
     ? yamlSingleQuoted(`UCAN_STORE_PUBLIC_ORIGIN=${publicOrigin}`)
     : "UCAN_STORE_PUBLIC_ORIGIN=";
+  const configureEnv = configureToken
+    ? `
+      - ${yamlSingleQuoted(`UCAN_STORE_CONFIGURE_TOKEN=${configureToken}`)}`
+    : "";
 
   return `version: "2.0"
 
@@ -110,7 +115,7 @@ services:
     env:
       - ${publicOriginEnv}
       - UCAN_STORE_DATA_DIR=/data/ucan-store
-      - IPFS_PATH=/data/ipfs${sshEnv}
+      - IPFS_PATH=/data/ipfs${sshEnv}${configureEnv}
 
 profiles:
   compute:
@@ -194,9 +199,16 @@ export const SDL_TEMPLATES: SdlTemplate[] = [
           const origin = normalizeUcanStorePublicOrigin(value);
           const host = ucanStorePublicOriginHost(origin);
           return origin
-            ? `Sets UCAN_STORE_PUBLIC_ORIGIN=${origin} and accepts host ${host}. After deployment, load access details and point DNS for that host to the provider ingress hostname, or use the provider A/AAAA records if your zone cannot CNAME there. Wait for DNS/TLS before treating this as the public origin.`
+            ? `Accepts host ${host}. After deployment, load access details, set the provider origin first, then point DNS for this host to the provider ingress hostname. Verify DNS/TLS before switching the runtime public origin to ${origin}.`
             : "";
         },
+      },
+      {
+        id: "ucanStoreConfigureToken",
+        label: "Configure token",
+        inputType: "text",
+        role: "configureToken",
+        help: "Generated per browser session. The deployed service requires this bearer token before it accepts runtime origin changes.",
       },
     ],
     render: renderUcanStoreSdl,

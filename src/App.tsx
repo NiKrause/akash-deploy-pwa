@@ -86,6 +86,11 @@ type DomainVerification = {
   status: "checking" | "ok" | "fail";
   message: string;
 };
+type OriginConfigureStatus = {
+  origin: string;
+  status: "configuring" | "ok" | "fail";
+  message: string;
+};
 
 function shortenAddress(value: string): string {
   return value.length > 16 ? `${value.slice(0, 10)}...${value.slice(-8)}` : value;
@@ -128,6 +133,17 @@ function persistedTemplateValues(persisted: Persisted | null): SdlTemplateValues
     return { ucanStorePublicOrigin: persisted.ucanStorePublicOrigin };
   }
   return {};
+}
+
+function randomToken(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function withTemplateDefaults(templateId: SelectedSdlTemplate, values: SdlTemplateValues): SdlTemplateValues {
+  if (templateId !== "ucan-store" || values.ucanStoreConfigureToken?.trim()) return values;
+  return { ...values, ucanStoreConfigureToken: randomToken() };
 }
 
 function loadPersisted(): Persisted | null {
@@ -220,7 +236,7 @@ export default function App() {
   const [selectedSdlTemplate, setSelectedSdlTemplate] =
     useState<SelectedSdlTemplate>(initialSelectedSdlTemplate);
   const [sdlTemplateValues, setSdlTemplateValues] = useState<SdlTemplateValues>(() =>
-    persistedTemplateValues(loadPersisted())
+    withTemplateDefaults(initialSelectedSdlTemplate, persistedTemplateValues(loadPersisted()))
   );
 
   const endpoints = useMemo(() => {
@@ -239,7 +255,7 @@ export default function App() {
       getSdlTemplate(
         net,
         initialSelectedSdlTemplate === "custom" ? DEFAULT_SDL_TEMPLATE_ID : initialSelectedSdlTemplate,
-        persistedTemplateValues(loadPersisted())
+        withTemplateDefaults(initialSelectedSdlTemplate, persistedTemplateValues(loadPersisted()))
       );
     const esc = getEndpoints(net).deploymentEscrowMinimalDenom;
     return alignSdlPricingDenomsToEscrow(raw, esc);
@@ -259,6 +275,7 @@ export default function App() {
   const [leaseAccessByDseq, setLeaseAccessByDseq] = useState<Record<string, LeaseAccessDetails>>({});
   const [leaseAccessErrorByDseq, setLeaseAccessErrorByDseq] = useState<Record<string, string>>({});
   const [domainVerificationByDseq, setDomainVerificationByDseq] = useState<Record<string, DomainVerification>>({});
+  const [originConfigureByDseq, setOriginConfigureByDseq] = useState<Record<string, OriginConfigureStatus>>({});
   /** Mainnet AKT spot in USD (CoinGecko), applied to the `uakt` balance line. */
   const [aktUsdPrice, setAktUsdPrice] = useState<number | null>(null);
   const [step, setStep] = useState<DeployStep>("idle");
@@ -626,8 +643,10 @@ export default function App() {
 
   const selectSdlTemplate = useCallback(
     (templateId: SdlTemplateId) => {
+      const nextValues = withTemplateDefaults(templateId, sdlTemplateValues);
+      setSdlTemplateValues(nextValues);
       setSelectedSdlTemplate(templateId);
-      setYamlText(getSdlTemplate(network, templateId, sdlTemplateValues));
+      setYamlText(getSdlTemplate(network, templateId, nextValues));
     },
     [network, sdlTemplateValues]
   );
@@ -667,7 +686,9 @@ export default function App() {
       setCurrentLeases(null);
       setCurrentLeasesError(null);
       setSelectedSdlTemplate(nextTemplate);
-      setYamlText(getSdlTemplate(nextNetwork, nextTemplate, sdlTemplateValues));
+      const nextValues = withTemplateDefaults(nextTemplate, sdlTemplateValues);
+      setSdlTemplateValues(nextValues);
+      setYamlText(getSdlTemplate(nextNetwork, nextTemplate, nextValues));
     },
     [selectedSdlTemplate, sdlTemplateValues]
   );
@@ -682,9 +703,60 @@ export default function App() {
       ? null
       : SDL_TEMPLATES.find((template) => template.id === selectedSdlTemplate) ?? null;
   const publicOriginParameter = activeSdlTemplate?.parameters?.find((parameter) => parameter.role === "publicOrigin");
+  const configureTokenParameter = activeSdlTemplate?.parameters?.find((parameter) => parameter.role === "configureToken");
   const configuredPublicOrigin = publicOriginParameter
     ? normalizeUcanStorePublicOrigin(sdlTemplateValues[publicOriginParameter.id] ?? "")
     : "";
+  const configureToken = configureTokenParameter ? (sdlTemplateValues[configureTokenParameter.id] ?? "").trim() : "";
+
+  const configureServiceOrigin = useCallback(
+    async (dseqToConfigure: string, requestOrigin: string, publicOrigin: string) => {
+      const configureUrl = new URL("/configure", requestOrigin).toString();
+      setOriginConfigureByDseq((prev) => ({
+        ...prev,
+        [dseqToConfigure]: {
+          origin: publicOrigin,
+          status: "configuring",
+          message: `Configuring ${publicOrigin} via ${configureUrl}...`,
+        },
+      }));
+
+      try {
+        if (!configureToken) throw new Error("Missing configure token.");
+        const response = await fetch(configureUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${configureToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ publicOrigin }),
+        });
+        if (!response.ok) {
+          const text = await response.text().catch(() => "");
+          throw new Error(`HTTP ${response.status}${text ? `: ${text.slice(0, 200)}` : ""}`);
+        }
+        setOriginConfigureByDseq((prev) => ({
+          ...prev,
+          [dseqToConfigure]: {
+            origin: publicOrigin,
+            status: "ok",
+            message: `Configured public origin ${publicOrigin}.`,
+          },
+        }));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setOriginConfigureByDseq((prev) => ({
+          ...prev,
+          [dseqToConfigure]: {
+            origin: publicOrigin,
+            status: "fail",
+            message: `Configure failed: ${msg}`,
+          },
+        }));
+      }
+    },
+    [configureToken]
+  );
 
   const verifyPublicOrigin = useCallback(async (dseqToVerify: string, origin: string) => {
     const healthUrl = originHealthUrl(origin);
@@ -1218,7 +1290,14 @@ export default function App() {
                                     );
                                     const publicOriginHost = originHostname(configuredPublicOrigin);
                                     const dnsTarget = service.uris[0] ?? "";
+                                    const providerOrigin = normalizeUcanStorePublicOrigin(dnsTarget);
                                     const domainVerification = domainVerificationByDseq[deployment.dseq];
+                                    const originConfigure = originConfigureByDseq[deployment.dseq];
+                                    const customDomainVerified =
+                                      domainVerification?.origin === configuredPublicOrigin &&
+                                      domainVerification.status === "ok";
+                                    const isConfiguringOrigin = originConfigure?.status === "configuring";
+                                    const showRuntimeOriginSetup = !!providerOrigin && !!configureToken;
                                     const showDomainSetup = !!configuredPublicOrigin && !!publicOriginHost && !!dnsTarget;
 
                                     return (
@@ -1250,21 +1329,68 @@ export default function App() {
                                             )}
                                           </div>
                                         ) : null}
-                                        {showDomainSetup ? (
+                                        {showRuntimeOriginSetup || showDomainSetup ? (
                                           <div className="lease-service-block domain-setup-block">
-                                            <div className="muted small">Custom domain setup</div>
-                                            <code>
-                                              {publicOriginHost} CNAME {dnsTarget}
-                                            </code>
+                                            <div className="muted small">Runtime origin setup</div>
+                                            {providerOrigin ? (
+                                              <div className="lease-actions domain-setup-actions">
+                                                <button
+                                                  type="button"
+                                                  className="secondary tiny"
+                                                  onClick={() =>
+                                                    void configureServiceOrigin(
+                                                      deployment.dseq,
+                                                      providerOrigin,
+                                                      providerOrigin
+                                                    )
+                                                  }
+                                                  disabled={isConfiguringOrigin}
+                                                >
+                                                  {isConfiguringOrigin && originConfigure?.origin === providerOrigin
+                                                    ? "Configuring..."
+                                                    : "Use provider origin"}
+                                                </button>
+                                                <span className="muted mini">
+                                                  Sets the manifest to {providerOrigin} while DNS or TLS is still pending.
+                                                </span>
+                                              </div>
+                                            ) : null}
+                                            {showDomainSetup ? (
+                                              <code>
+                                                {publicOriginHost} CNAME {dnsTarget}
+                                              </code>
+                                            ) : null}
                                             <div className="lease-actions domain-setup-actions">
-                                              <button
-                                                type="button"
-                                                className="secondary tiny"
-                                                onClick={() => void verifyPublicOrigin(deployment.dseq, configuredPublicOrigin)}
-                                                disabled={domainVerification?.status === "checking"}
-                                              >
-                                                {domainVerification?.status === "checking" ? "Checking..." : "Verify DNS"}
-                                              </button>
+                                              {showDomainSetup ? (
+                                                <button
+                                                  type="button"
+                                                  className="secondary tiny"
+                                                  onClick={() =>
+                                                    void verifyPublicOrigin(deployment.dseq, configuredPublicOrigin)
+                                                  }
+                                                  disabled={domainVerification?.status === "checking"}
+                                                >
+                                                  {domainVerification?.status === "checking" ? "Checking..." : "Verify DNS"}
+                                                </button>
+                                              ) : null}
+                                              {showDomainSetup ? (
+                                                <button
+                                                  type="button"
+                                                  className="secondary tiny"
+                                                  onClick={() =>
+                                                    void configureServiceOrigin(
+                                                      deployment.dseq,
+                                                      configuredPublicOrigin,
+                                                      configuredPublicOrigin
+                                                    )
+                                                  }
+                                                  disabled={!customDomainVerified || isConfiguringOrigin}
+                                                >
+                                                  {isConfiguringOrigin && originConfigure?.origin === configuredPublicOrigin
+                                                    ? "Configuring..."
+                                                    : "Use custom origin"}
+                                                </button>
+                                              ) : null}
                                               <span
                                                 className={`mini ${
                                                   domainVerification?.status === "ok"
@@ -1274,11 +1400,26 @@ export default function App() {
                                                       : "muted"
                                                 }`}
                                               >
-                                                {domainVerification?.origin === configuredPublicOrigin
+                                                {showDomainSetup && domainVerification?.origin === configuredPublicOrigin
                                                   ? domainVerification.message
-                                                  : "After DNS points here, verify from this browser before using the custom origin."}
+                                                  : showDomainSetup
+                                                    ? "After DNS points here, verify from this browser before using the custom origin."
+                                                    : "Add a custom domain in the SDL template before deployment to enable the second step."}
                                               </span>
                                             </div>
+                                            {originConfigure ? (
+                                              <span
+                                                className={`mini ${
+                                                  originConfigure.status === "ok"
+                                                    ? "domain-status-ok"
+                                                    : originConfigure.status === "fail"
+                                                      ? "domain-status-fail"
+                                                      : "muted"
+                                                }`}
+                                              >
+                                                {originConfigure.message}
+                                              </span>
+                                            ) : null}
                                           </div>
                                         ) : null}
                                         {service.ports.length > 0 ? (
