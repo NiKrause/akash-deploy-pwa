@@ -48,3 +48,55 @@ test("parseLeaseAccessDetails preserves service key when provider omits service 
 
   assert.equal(details.services[0]?.name, "web");
 });
+
+test("parseLeaseAccessDetails merges top-level forwarded ports into matching services", () => {
+  const details = parseLeaseAccessDetails("27652073", "akash1provider", "https://provider.example:8443", "status-url", {
+    services: {
+      "ucan-store": {
+        name: "ucan-store",
+        uris: ["ucan-store.ingress.example"],
+        replicas: 1,
+        ready_replicas: 1,
+      },
+    },
+    forwarded_ports: {
+      "ucan-store": [
+        {
+          host: "provider-node.example",
+          name: "ucan-store",
+          proto: "tcp",
+          port: 22,
+          external_port: 31778,
+        },
+      ],
+    },
+  });
+
+  assert.equal(details.services.length, 1);
+  assert.deepEqual(details.services[0]?.ports, [
+    {
+      host: "provider-node.example",
+      name: "ucan-store",
+      proto: "tcp",
+      port: 22,
+      externalPort: 31778,
+    },
+  ]);
+});
+
+test("parseLeaseAccessDetails creates a service when only forwarded ports are reported", () => {
+  const details = parseLeaseAccessDetails("27652073", "akash1provider", "https://provider.example:8443", "status-url", {
+    forwardedPorts: {
+      "ucan-store": {
+        host: "provider-node.example",
+        name: "ucan-store",
+        port: 22,
+        externalPort: 31778,
+      },
+    },
+  });
+
+  assert.equal(details.services.length, 1);
+  assert.equal(details.services[0]?.name, "ucan-store");
+  assert.equal(details.services[0]?.ports[0]?.externalPort, 31778);
+});

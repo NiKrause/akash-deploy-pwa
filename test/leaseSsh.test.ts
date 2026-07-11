@@ -64,3 +64,23 @@ test("collectLeaseSshCommands ignores missing provider SSH forwarding", () => {
 
   assert.deepEqual(commands, []);
 });
+
+test("collectLeaseSshCommands ignores non-SSH services even when the external port is 2222", () => {
+  const commands = collectLeaseSshCommands(
+    {
+      ports: [
+        {
+          host: "provider.example",
+          name: "web",
+          proto: "tcp",
+          port: 8080,
+          externalPort: 2222,
+        },
+      ],
+      ips: [],
+    },
+    [expectedSsh]
+  );
+
+  assert.deepEqual(commands, []);
+});

@@ -117,6 +117,20 @@ function parseLeaseAccessService(value: unknown): LeaseAccessService | null {
   };
 }
 
+function emptyLeaseAccessService(name: string): LeaseAccessService {
+  return {
+    name,
+    available: 0,
+    total: 0,
+    uris: [],
+    replicas: 0,
+    readyReplicas: 0,
+    availableReplicas: 0,
+    ports: [],
+    ips: [],
+  };
+}
+
 function serviceValuesFromProviderStatus(value: unknown): unknown[] {
   if (!isRecord(value)) return [];
   const servicesRaw = readRecordValue(value, "services");
@@ -126,6 +140,41 @@ function serviceValuesFromProviderStatus(value: unknown): unknown[] {
     if (!isRecord(service)) return service;
     return readString(readRecordValue(service, "name")) ? service : { ...service, name };
   });
+}
+
+function forwardedPortsFromProviderStatus(value: unknown): Map<string, LeaseAccessPort[]> {
+  const portsByService = new Map<string, LeaseAccessPort[]>();
+  if (!isRecord(value)) return portsByService;
+
+  const rawForwardedPorts = readRecordValue(value, "forwarded_ports", "forwardedPorts");
+  if (!rawForwardedPorts) return portsByService;
+
+  const addPort = (serviceName: string, rawPort: unknown) => {
+    const port = parseLeaseAccessPort(rawPort);
+    const normalizedServiceName = serviceName.trim() || port?.name.trim() || "service";
+    if (!port || !normalizedServiceName) return;
+    portsByService.set(normalizedServiceName, [...(portsByService.get(normalizedServiceName) ?? []), port]);
+  };
+
+  if (Array.isArray(rawForwardedPorts)) {
+    for (const rawPort of rawForwardedPorts) {
+      if (!isRecord(rawPort)) continue;
+      addPort(readString(readRecordValue(rawPort, "service", "serviceName", "service_name", "name")) ?? "", rawPort);
+    }
+    return portsByService;
+  }
+
+  if (!isRecord(rawForwardedPorts)) return portsByService;
+
+  for (const [serviceName, rawPorts] of Object.entries(rawForwardedPorts)) {
+    if (Array.isArray(rawPorts)) {
+      for (const rawPort of rawPorts) addPort(serviceName, rawPort);
+    } else {
+      addPort(serviceName, rawPorts);
+    }
+  }
+
+  return portsByService;
 }
 
 export function parseLeaseAccessDetails(
@@ -138,6 +187,17 @@ export function parseLeaseAccessDetails(
   const services = serviceValuesFromProviderStatus(value)
     .map(parseLeaseAccessService)
     .filter((entry): entry is LeaseAccessService => !!entry);
+  const forwardedPorts = forwardedPortsFromProviderStatus(value);
+
+  for (const [serviceName, ports] of forwardedPorts) {
+    const service = services.find((entry) => entry.name === serviceName);
+    if (service) {
+      service.ports.push(...ports);
+    } else {
+      services.push({ ...emptyLeaseAccessService(serviceName), ports });
+    }
+  }
+
   return {
     dseq,
     provider,

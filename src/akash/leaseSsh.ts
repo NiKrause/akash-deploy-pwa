@@ -20,12 +20,13 @@ function matchesExpectedSshPort(
   providerPort: Pick<LeaseAccessPort | LeaseAccessIp, "port" | "externalPort">,
   expectedSshPorts: SdlExposedPort[]
 ): boolean {
-  return expectedSshPorts.some(
-    (expected) =>
-      providerPort.port === expected.containerPort ||
-      providerPort.externalPort === expected.publicPort ||
-      providerPort.externalPort === expected.containerPort
-  );
+  return expectedSshPorts.some((expected) => {
+    if (providerPort.port > 0) {
+      return providerPort.port === expected.containerPort;
+    }
+
+    return providerPort.externalPort === expected.publicPort || providerPort.externalPort === expected.containerPort;
+  });
 }
 
 function sshCommand(host: string, port: number, source: LeaseSshCommand["source"]): LeaseSshCommand {
