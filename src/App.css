@@ -508,6 +508,10 @@ button.lease-view-tab-active {
   font-size: 0.8rem;
 }
 
+.mini {
+  font-size: 0.72rem;
+}
+
 button {
   background: #38bdf8;
   color: #020617;
@@ -573,9 +577,32 @@ button.deploy {
   line-height: 1.35;
 }
 
+.sdl-template-options {
+  display: grid;
+  grid-template-columns: auto minmax(12rem, 1fr);
+  align-items: start;
+  gap: 0.35rem 0.75rem;
+  margin: 0 0 0.75rem;
+}
+
+.sdl-domain-input {
+  min-height: 2.1rem;
+}
+
+.sdl-domain-hint {
+  grid-column: 2;
+  margin: 0;
+  line-height: 1.35;
+}
+
 @media (max-width: 42rem) {
-  .sdl-template-row {
+  .sdl-template-row,
+  .sdl-template-options {
     grid-template-columns: 1fr;
+  }
+
+  .sdl-domain-hint {
+    grid-column: auto;
   }
 }
 

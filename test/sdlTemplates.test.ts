@@ -7,6 +7,8 @@ import {
   UCAN_STORE_AKASH_IMAGE,
   getDefaultSdl,
   getSdlTemplate,
+  normalizeUcanStorePublicOrigin,
+  ucanStorePublicOriginHost,
 } from "../src/akash/defaultSdl.ts";
 import { getEndpoints } from "../src/config/networks.ts";
 
@@ -25,6 +27,23 @@ test("UCAN Store SSH exposure is opt-in", () => {
 test("UCAN Store template reserves enough memory for Kubo and the app", () => {
   const sdl = getDefaultSdl("mainnet");
   assert.match(sdl, /memory:\n\s+size: 2Gi/);
+});
+
+test("UCAN Store template can set a custom public origin and accepted host", () => {
+  const sdl = getSdlTemplate("mainnet", "ucan-store", {
+    ucanStorePublicOrigin: "ucan.example.com/some/path",
+  });
+
+  assert.match(sdl, /- 'UCAN_STORE_PUBLIC_ORIGIN=https:\/\/ucan\.example\.com'/);
+  assert.match(sdl, /accept:\n\s+- 'ucan\.example\.com'/);
+  assert.doesNotMatch(sdl, /some\/path/);
+});
+
+test("UCAN Store public origin helpers normalize domains to origins", () => {
+  assert.equal(normalizeUcanStorePublicOrigin("ucan.example.com/path"), "https://ucan.example.com");
+  assert.equal(normalizeUcanStorePublicOrigin("http://localhost:8080/api"), "http://localhost:8080");
+  assert.equal(normalizeUcanStorePublicOrigin("ftp://example.com"), "");
+  assert.equal(ucanStorePublicOriginHost("https://ucan.example.com/api"), "ucan.example.com");
 });
 
 test("all SDL templates align pricing denom to the selected network escrow denom", () => {

@@ -9,7 +9,11 @@ type SdlTemplate = {
   id: SdlTemplateId;
   name: string;
   description: string;
-  render: (mode: NetworkMode) => string;
+  render: (mode: NetworkMode, options?: SdlTemplateOptions) => string;
+};
+
+export type SdlTemplateOptions = {
+  ucanStorePublicOrigin?: string;
 };
 
 function env(name: string): string {
@@ -32,10 +36,41 @@ export function alignSdlPricingDenomsToEscrow(yaml: string, escrowDenom: string)
     .replace(/denom:\s*'(?:uakt|uact)'/g, `denom: '${escrowDenom}'`);
 }
 
-function renderUcanStoreSdl(mode: NetworkMode): string {
+export function normalizeUcanStorePublicOrigin(value: string): string {
+  const raw = value.trim();
+  if (!raw) return "";
+  const withScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const url = new URL(withScheme);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+    if (!url.hostname) return "";
+    return url.origin;
+  } catch {
+    return "";
+  }
+}
+
+export function ucanStorePublicOriginHost(value: string): string {
+  const origin = normalizeUcanStorePublicOrigin(value);
+  if (!origin) return "";
+  try {
+    return new URL(origin).hostname;
+  } catch {
+    return "";
+  }
+}
+
+function renderUcanStoreSdl(mode: NetworkMode, options: SdlTemplateOptions = {}): string {
   const d = getEndpoints(mode).deploymentEscrowMinimalDenom;
   const sshPublicKey = env("VITE_UCAN_STORE_SSH_PUBLIC_KEY");
   const sshPublicPort = env("VITE_UCAN_STORE_SSH_PUBLIC_PORT") || "2222";
+  const publicOrigin = normalizeUcanStorePublicOrigin(options.ucanStorePublicOrigin ?? "");
+  const publicOriginHost = ucanStorePublicOriginHost(publicOrigin);
+  const acceptHosts = publicOriginHost
+    ? `
+        accept:
+          - ${yamlSingleQuoted(publicOriginHost)}`
+    : "";
   const sshExpose = sshPublicKey
     ? `
       - port: 22
@@ -48,6 +83,9 @@ function renderUcanStoreSdl(mode: NetworkMode): string {
     ? `
       - ${yamlSingleQuoted(`UCAN_STORE_SSH_AUTHORIZED_KEYS=${sshPublicKey}`)}`
     : "";
+  const publicOriginEnv = publicOrigin
+    ? yamlSingleQuoted(`UCAN_STORE_PUBLIC_ORIGIN=${publicOrigin}`)
+    : "UCAN_STORE_PUBLIC_ORIGIN=";
 
   return `version: "2.0"
 
@@ -56,11 +94,11 @@ services:
     image: ${UCAN_STORE_AKASH_IMAGE}
     expose:
       - port: 8080
-        as: 80
+        as: 80${acceptHosts}
         to:
           - global: true${sshExpose}
     env:
-      - UCAN_STORE_PUBLIC_ORIGIN=
+      - ${publicOriginEnv}
       - UCAN_STORE_DATA_DIR=/data/ucan-store
       - IPFS_PATH=/data/ipfs${sshEnv}
 
@@ -148,9 +186,13 @@ export function isSdlTemplateId(value: unknown): value is SdlTemplateId {
   return typeof value === "string" && SDL_TEMPLATES.some((template) => template.id === value);
 }
 
-export function getSdlTemplate(mode: NetworkMode, templateId: SdlTemplateId = DEFAULT_SDL_TEMPLATE_ID): string {
+export function getSdlTemplate(
+  mode: NetworkMode,
+  templateId: SdlTemplateId = DEFAULT_SDL_TEMPLATE_ID,
+  options: SdlTemplateOptions = {}
+): string {
   const template = SDL_TEMPLATES.find((candidate) => candidate.id === templateId) ?? SDL_TEMPLATES[0];
-  return template.render(mode);
+  return template.render(mode, options);
 }
 
 /** Default SDL. Placement pricing denom follows deployment escrow. */

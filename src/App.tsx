@@ -13,7 +13,9 @@ import {
   alignSdlPricingDenomsToEscrow,
   getSdlTemplate,
   isSdlTemplateId,
+  normalizeUcanStorePublicOrigin,
   type SdlTemplateId,
+  ucanStorePublicOriginHost,
 } from "./akash/defaultSdl";
 import {
   closeDeploymentTx,
@@ -67,6 +69,7 @@ type Persisted = {
   network: NetworkMode;
   yaml: string;
   sdlTemplate?: SdlTemplateId | "custom";
+  ucanStorePublicOrigin?: string;
   dseq?: string;
   rest?: string;
   rpc?: string;
@@ -189,6 +192,9 @@ export default function App() {
   }, []);
   const [selectedSdlTemplate, setSelectedSdlTemplate] =
     useState<SelectedSdlTemplate>(initialSelectedSdlTemplate);
+  const [ucanStorePublicOrigin, setUcanStorePublicOrigin] = useState(
+    () => loadPersisted()?.ucanStorePublicOrigin ?? ""
+  );
 
   const endpoints = useMemo(() => {
     const base = getEndpoints(network);
@@ -205,7 +211,8 @@ export default function App() {
       persisted ??
       getSdlTemplate(
         net,
-        initialSelectedSdlTemplate === "custom" ? DEFAULT_SDL_TEMPLATE_ID : initialSelectedSdlTemplate
+        initialSelectedSdlTemplate === "custom" ? DEFAULT_SDL_TEMPLATE_ID : initialSelectedSdlTemplate,
+        { ucanStorePublicOrigin: loadPersisted()?.ucanStorePublicOrigin ?? "" }
       );
     const esc = getEndpoints(net).deploymentEscrowMinimalDenom;
     return alignSdlPricingDenomsToEscrow(raw, esc);
@@ -323,11 +330,12 @@ export default function App() {
       network,
       yaml: yamlText,
       sdlTemplate: selectedSdlTemplate,
+      ucanStorePublicOrigin,
       dseq: dseq ?? undefined,
       rest: restInput,
       rpc: rpcInput,
     });
-  }, [network, yamlText, selectedSdlTemplate, dseq, restInput, rpcInput]);
+  }, [network, yamlText, selectedSdlTemplate, ucanStorePublicOrigin, dseq, restInput, rpcInput]);
 
   const runEndpointTests = useCallback(async () => {
     setProbing(true);
@@ -591,15 +599,25 @@ export default function App() {
   const selectSdlTemplate = useCallback(
     (templateId: SdlTemplateId) => {
       setSelectedSdlTemplate(templateId);
-      setYamlText(getSdlTemplate(network, templateId));
+      setYamlText(getSdlTemplate(network, templateId, { ucanStorePublicOrigin }));
     },
-    [network]
+    [network, ucanStorePublicOrigin]
   );
 
   const editYamlText = useCallback((nextYaml: string) => {
     setSelectedSdlTemplate("custom");
     setYamlText(nextYaml);
   }, []);
+
+  const updateUcanStorePublicOrigin = useCallback(
+    (nextOrigin: string) => {
+      setUcanStorePublicOrigin(nextOrigin);
+      if (selectedSdlTemplate === "ucan-store") {
+        setYamlText(getSdlTemplate(network, "ucan-store", { ucanStorePublicOrigin: nextOrigin }));
+      }
+    },
+    [network, selectedSdlTemplate]
+  );
 
   const selectNetwork = useCallback(
     (nextNetwork: NetworkMode) => {
@@ -618,9 +636,9 @@ export default function App() {
       setCurrentLeases(null);
       setCurrentLeasesError(null);
       setSelectedSdlTemplate(nextTemplate);
-      setYamlText(getSdlTemplate(nextNetwork, nextTemplate));
+      setYamlText(getSdlTemplate(nextNetwork, nextTemplate, { ucanStorePublicOrigin }));
     },
-    [selectedSdlTemplate]
+    [selectedSdlTemplate, ucanStorePublicOrigin]
   );
 
   const hasLeaseSection = address !== null && currentLeases !== null;
@@ -632,6 +650,8 @@ export default function App() {
     selectedSdlTemplate === "custom"
       ? null
       : SDL_TEMPLATES.find((template) => template.id === selectedSdlTemplate) ?? null;
+  const normalizedUcanStorePublicOrigin = normalizeUcanStorePublicOrigin(ucanStorePublicOrigin);
+  const normalizedUcanStorePublicOriginHost = ucanStorePublicOriginHost(ucanStorePublicOrigin);
 
   return (
     <div className="app">
@@ -1335,6 +1355,38 @@ export default function App() {
             {activeSdlTemplate?.description ?? "Edited SDL. Pick a template to replace the editor content."}
           </span>
         </div>
+        {selectedSdlTemplate === "ucan-store" ? (
+          <div className="sdl-template-options">
+            <label className="sdl-template-label" htmlFor="ucan-store-public-origin">
+              Custom domain
+            </label>
+            <input
+              id="ucan-store-public-origin"
+              className="endpoint-input sdl-domain-input"
+              type="text"
+              value={ucanStorePublicOrigin}
+              onChange={(e) => updateUcanStorePublicOrigin(e.target.value)}
+              placeholder="https://ucan.example.com"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <p className="muted mini sdl-domain-hint">
+              {normalizedUcanStorePublicOrigin ? (
+                <>
+                  Sets <code>UCAN_STORE_PUBLIC_ORIGIN={normalizedUcanStorePublicOrigin}</code> and accepts host{" "}
+                  <code>{normalizedUcanStorePublicOriginHost}</code>. After deployment, load access details and point DNS
+                  for that host to the provider ingress hostname, or use the provider A/AAAA records if your zone cannot
+                  CNAME there. Wait for DNS/TLS before treating this as the public origin.
+                </>
+              ) : (
+                <>
+                  Optional. Enter the final HTTPS origin before deploying. After the lease is ready, the access details
+                  tell you which provider ingress target your DNS should point to.
+                </>
+              )}
+            </p>
+          </div>
+        ) : null}
         <p className="muted small sdl-escrow-hint">
           Default SDL pricing and the create-deployment deposit use{" "}
           <strong>{endpoints.deploymentEscrowCoinDenom}</strong> (<code>{endpoints.deploymentEscrowMinimalDenom}</code>
