@@ -142,8 +142,12 @@ function randomToken(): string {
 }
 
 function withTemplateDefaults(templateId: SelectedSdlTemplate, values: SdlTemplateValues): SdlTemplateValues {
-  if (templateId !== "ucan-store" || values.ucanStoreConfigureToken?.trim()) return values;
-  return { ...values, ucanStoreConfigureToken: randomToken() };
+  if (templateId !== "ucan-store") return values;
+  return {
+    ...values,
+    ucanStoreConfigureToken: values.ucanStoreConfigureToken?.trim() || randomToken(),
+    ucanStoreDelegationAdminToken: values.ucanStoreDelegationAdminToken?.trim() || randomToken(),
+  };
 }
 
 function loadPersisted(): Persisted | null {

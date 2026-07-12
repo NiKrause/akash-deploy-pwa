@@ -37,9 +37,12 @@ test("UCAN Store declares UI parameters for flexible SDL generation", () => {
   assert.equal(template?.parameters?.[1]?.id, "ucanStoreConfigureToken");
   assert.equal(template?.parameters?.[1]?.inputType, "text");
   assert.equal(template?.parameters?.[1]?.role, "configureToken");
-  assert.equal(template?.parameters?.[2]?.id, "ucanStoreSelfManagedTls");
-  assert.equal(template?.parameters?.[2]?.inputType, "checkbox");
-  assert.equal(template?.parameters?.[2]?.defaultValue, "true");
+  assert.equal(template?.parameters?.[2]?.role, "delegationAdminToken");
+  assert.equal(template?.parameters?.[2]?.id, "ucanStoreDelegationAdminToken");
+  assert.equal(template?.parameters?.[2]?.inputType, "text");
+  assert.equal(template?.parameters?.[3]?.id, "ucanStoreSelfManagedTls");
+  assert.equal(template?.parameters?.[3]?.inputType, "checkbox");
+  assert.equal(template?.parameters?.[3]?.defaultValue, "true");
 });
 
 test("UCAN Store template can set a custom public origin and accepted host", () => {
@@ -59,12 +62,14 @@ test("UCAN Store template keeps custom origin runtime-configurable when a config
   const sdl = getSdlTemplate("mainnet", "ucan-store", {
     ucanStorePublicOrigin: "ucan.example.com/some/path",
     ucanStoreConfigureToken: "configure-secret",
+    ucanStoreDelegationAdminToken: "admin-secret",
   });
 
   assert.match(sdl, /- UCAN_STORE_PUBLIC_ORIGIN=/);
   assert.doesNotMatch(sdl, /UCAN_STORE_PUBLIC_ORIGIN=https:\/\/ucan\.example\.com/);
   assert.match(sdl, /- 'UCAN_STORE_TLS_DOMAIN=ucan\.example\.com'/);
   assert.match(sdl, /- 'UCAN_STORE_CONFIGURE_TOKEN=configure-secret'/);
+  assert.match(sdl, /- 'UCAN_STORE_ADMIN_API_TOKEN=admin-secret'/);
   assert.match(sdl, /accept:\n\s+- 'ucan\.example\.com'/);
 });
 
