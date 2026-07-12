@@ -3,13 +3,13 @@ import { getEndpoints, type NetworkMode } from "../config/networks.ts";
 export type SdlTemplateId = "ucan-store" | "nginx-smoke";
 
 export const UCAN_STORE_AKASH_IMAGE =
-  "ghcr.io/nomadkids/ucan-store-akash@sha256:78e4b73722eb35d134af30632f84e14e347d5b0cb837921774701fbabb16a7b9";
+  "ghcr.io/nomadkids/ucan-store-akash@sha256:5e61a6530dcceced2ca7796fad41e03645148aaedd36490ec743869f1ee36a6a";
 
 export type SdlTemplateParameter = {
   id: string;
   label: string;
   inputType: "checkbox" | "text" | "url" | "textarea";
-  role?: "publicOrigin" | "configureToken";
+  role?: "publicOrigin" | "configureToken" | "delegationAdminToken";
   placeholder?: string;
   defaultValue?: string;
   help: string;
@@ -77,6 +77,7 @@ function renderUcanStoreSdl(mode: NetworkMode, options: SdlTemplateOptions = {})
   const publicOrigin = normalizeUcanStorePublicOrigin(options.ucanStorePublicOrigin ?? "");
   const publicOriginHost = ucanStorePublicOriginHost(publicOrigin);
   const configureToken = options.ucanStoreConfigureToken?.trim() ?? "";
+  const delegationAdminToken = options.ucanStoreDelegationAdminToken?.trim() ?? "";
   const selfManagedTls = !!publicOriginHost && options.ucanStoreSelfManagedTls !== "false";
   const httpContainerPort = selfManagedTls ? 80 : 8080;
   const acceptHosts = publicOriginHost
@@ -115,6 +116,10 @@ function renderUcanStoreSdl(mode: NetworkMode, options: SdlTemplateOptions = {})
     ? `
       - ${yamlSingleQuoted(`UCAN_STORE_CONFIGURE_TOKEN=${configureToken}`)}`
     : "";
+  const delegationAdminEnv = delegationAdminToken
+    ? `
+      - ${yamlSingleQuoted(`UCAN_STORE_ADMIN_API_TOKEN=${delegationAdminToken}`)}`
+    : "";
 
   return `version: "2.0"
 
@@ -129,7 +134,7 @@ services:
     env:
       - ${publicOriginEnv}
       - UCAN_STORE_DATA_DIR=/data/ucan-store
-      - IPFS_PATH=/data/ipfs${selfManagedTlsEnv}${sshEnv}${configureEnv}
+      - IPFS_PATH=/data/ipfs${selfManagedTlsEnv}${sshEnv}${configureEnv}${delegationAdminEnv}
 
 profiles:
   compute:
@@ -223,6 +228,13 @@ export const SDL_TEMPLATES: SdlTemplate[] = [
         inputType: "text",
         role: "configureToken",
         help: "Generated per browser session. The deployed service requires this bearer token before it accepts runtime origin changes.",
+      },
+      {
+        id: "ucanStoreDelegationAdminToken",
+        label: "Delegation admin token",
+        inputType: "text",
+        role: "delegationAdminToken",
+        help: "Generated per browser session. This powerful bearer token lets the deployed service issue UCAN upload delegations to browser DIDs. Keep it private and never reuse the configure token.",
       },
       {
         id: "ucanStoreSelfManagedTls",
