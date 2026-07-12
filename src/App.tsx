@@ -219,6 +219,58 @@ function originHostname(origin: string): string {
   }
 }
 
+function delegationCurl(origin: string, adminToken: string): string {
+  const base = normalizeUcanStorePublicOrigin(origin) || "https://YOUR-UCAN-STORE-HOST";
+  const token = adminToken || "YOUR-DELEGATION-ADMIN-TOKEN";
+  return `curl -X POST '${base}/api/admin/delegations' \\
+  -H 'Authorization: Bearer ${token}' \\
+  -H 'Content-Type: application/json' \\
+  --data '{
+    "targetDid": "REPLACE-WITH-BROWSER-DID",
+    "capabilities": ["space/blob/add", "upload/add", "upload/list"],
+    "expirationSeconds": 86400
+  }'`;
+}
+
+function DelegationCurlEditor({ origin, adminToken }: { origin: string; adminToken: string }) {
+  const generated = delegationCurl(origin, adminToken);
+  const [command, setCommand] = useState(generated);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setCommand(generated);
+    setCopied(false);
+  }, [generated]);
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(command);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  };
+
+  return (
+    <div className="delegation-curl-editor">
+      <div className="delegation-curl-heading">
+        <span className="muted mini">Replace the browser DID, then copy and run this command.</span>
+        <button type="button" className="secondary tiny" onClick={() => void copy()}>
+          {copied ? "Copied" : "Copy curl"}
+        </button>
+      </div>
+      <textarea
+        aria-label="Editable delegation curl command"
+        className="delegation-curl-textarea"
+        value={command}
+        onChange={(event) => {
+          setCommand(event.target.value);
+          setCopied(false);
+        }}
+        rows={10}
+        spellCheck={false}
+      />
+    </div>
+  );
+}
+
 export default function App() {
   const persistedNetRef = useRef<ReturnType<typeof readPersistedNetworkFields> | null>(null);
   if (persistedNetRef.current === null) {
@@ -1617,9 +1669,19 @@ export default function App() {
               const checkboxChecked = value ? value === "true" : parameter.defaultValue === "true";
               return (
                 <Fragment key={parameter.id}>
-                  <label className="sdl-template-label" htmlFor={inputId}>
-                    {parameter.label}
-                  </label>
+                  <span className="sdl-template-label sdl-template-label-with-info">
+                    <label htmlFor={inputId}>{parameter.label}</label>
+                    {parameter.role === "delegationAdminToken" ? (
+                      <span
+                        className="tiny-info-icon"
+                        tabIndex={0}
+                        aria-label="Delegation command information"
+                        data-tooltip="This token authorizes UCAN delegation creation. Edit the browser DID in the curl command before copying it."
+                      >
+                        i
+                      </span>
+                    ) : null}
+                  </span>
                   {parameter.inputType === "checkbox" ? (
                     <input
                       id={inputId}
@@ -1651,6 +1713,12 @@ export default function App() {
                     />
                   )}
                   <p className="muted mini sdl-domain-hint">{help}</p>
+                  {parameter.role === "delegationAdminToken" ? (
+                    <DelegationCurlEditor
+                      origin={configuredPublicOrigin}
+                      adminToken={value}
+                    />
+                  ) : null}
                 </Fragment>
               );
             })}
