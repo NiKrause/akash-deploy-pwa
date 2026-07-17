@@ -184,3 +184,9 @@ See [CHANGES.md](./CHANGES.md) for release notes.
 - [UCAN](https://ucan.xyz/)
 
 UCAN Store is built from the UCAN and upload-service open-source lineage developed by the Storacha/web3.storage community. See the UCAN Store README for the full acknowledgement and compatibility context.
+
+## License
+
+MIT. See [LICENSE](./LICENSE).
+
+The license applies to the source code and associated documentation unless otherwise stated. Third-party dependencies and incorporated components remain subject to their respective licenses.
